@@ -1,24 +1,27 @@
 /*********
-  ESP32 Web server
+  Relay Controller implemented with ESP8266 Web server
   Joe Brendler - 10/15/2022
   Built on a foundation of various tutorials including Tomasz Tarnowski's getting started
   and WiFi Connect, a number of OTA methods, etc.
-  "Implementa un servidor web al que se accede mediante una conección WiFi"
-  Based on work by Osvaldo Cantone  correo@cantone.com.ar
-  from Ramos Mejía, ARGENTINA, Agosto 2020
+  Also based on 2020 work by Osvaldo Cantone  correo@cantone.com.ar, Ramos Mejía, ARGENTINA
   Cantone also credits sketches developed by Rui Santos https://randomnerdtutorials.com
+  // ToDo - generalize for either ESP8266 *or* ESP32
   */
+
 #include <Arduino.h>
 //#define ESP32_RTOS // Uncomment this line if you want to use the code with freertos only on the ESP32
 // Has to be done before including "OTA.h"
 
+// ToDo - generalize for either ESP8266 *or* ESP32
 #include "OTA.h"
 #include <credentials.h>
-#include <AsyncTCP.h>
+//#include <AsyncTCP.h>   // for ESP32
+#include <ESPAsyncTCP.h> // for ESP8266
 #include <ESPAsyncWebServer.h>
 
-const int LED_ON = HIGH; // ctive high for ESP32; ESP12 8_16 is active low)
-const int LED_OFF = LOW;
+// ToDo - generalize for either ESP8266 *or* ESP32
+const int LED_ON = LOW; // active high for ESP32; ESP12 8266 is active low)
+const int LED_OFF = HIGH;
 
 // function definition (see function further below)
 void check_wifi_status();
@@ -50,13 +53,11 @@ int show = -1;
 
 void setup()
 {
-  int error;
-
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LED_OFF);
 
   Serial.begin(115200);
-  Serial.println("Booting");
+  Serial.println("\n\nBooting...\n");
 
   // Initialize the relays to an "ON" state
   pinMode(output_1_, OUTPUT);
@@ -66,7 +67,8 @@ void setup()
 
   // Note that OTA turns on wifi, using credentials.h
   // Specify hostname here (use unique name each time)
-  setupOTA("JoeESP32_WebServer_01", mySSID, myPASSWORD);
+  // ToDo - generalize for either ESP8266 *or* ESP32
+  setupOTA("JoeESP8266_WebServer_01", mySSID, myPASSWORD);
 
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED)
@@ -80,29 +82,23 @@ void setup()
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  /*
-    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(200, "text/plain", "Hi! I am ESP32."); });
-
-   // AsyncElegantOTA.begin(&server); // Start ElegantOTA
-    webServer.begin();
-    Serial.println("HTTP webServer started");
-  */
   // start wifi web server
   wifiServer.begin();
+  Serial.println("Web Server Starting...\n\n");
 }
 
 void loop()
 {
-//#ifdef defined(ESP32_RTOS) && defined(ESP32)
+// ToDo - generalize for either ESP8266 *or* ESP32
 #if defined(ESP32_RTOS) && defined(ESP32)
 #else // If you do not use FreeRTOS, you have to regulary call the handle method.
   ArduinoOTA.handle();
 #endif
-
-  // Your code here
+  delay(1);
   check_wifi_status();
+  delay(1);
   handle_web_client();
+  delay(1);
 }
 
 void check_wifi_status()
@@ -115,7 +111,6 @@ void check_wifi_status()
   {
     digitalWrite(LED_BUILTIN, LED_OFF);
   }
-  delay(100);
 }
 
 void handle_web_client()
@@ -187,11 +182,12 @@ void handle_web_client()
             client.println(".button2 {background-color: #555555;}</style></head>");
 
             // Web Page Heading
-            client.println("<body><h1>ESP32 Web Server</h1>");
-            client.println("<p>Adapted by Osvaldo Cantone <a href=https://github.com/ocantone/ESP32-Relay-LCD-Display-I2C> GItHub/ocantone </a> </p>");
+            // ToDo - generalize for either ESP8266 *or* ESP32
+            client.println("<body><h1>ESP8266 Relay Control Web Server</h1>");
+            client.println("<p>Adapted by Joe Brendler <a href=https://github.com/JosephBrendler/joeBot/tree/main/0TA_WebServer_ESP12_RelayController> GitHub/JosephBrendler </a> </p>");
 
             // Display current state, and ON/OFF buttons for GPIO 15
-            client.println("<p>GPIO _1_ - State " + output_1_State + "</p>");
+            client.println("<p>Output 1 (GPIO " + String(output_1_) + ") - State: [" + output_1_State + "]</p>");
             // If the output_1_State is off, it displays the ON button
             if (output_1_State == "off")
             {
@@ -203,7 +199,7 @@ void handle_web_client()
             }
 
             // Display current state, and ON/OFF buttons for GPIO 2
-            client.println("<p>GPIO _2_ - State " + output_2_State + "</p>");
+            client.println("<p>Output 2 (GPIO " + String(output_2_) + ") - State: [" + output_2_State + "]</p>");
             // If the output_2_State is off, it displays the ON button
             if (output_2_State == "off")
             {
