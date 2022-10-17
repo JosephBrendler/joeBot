@@ -10,6 +10,17 @@ const int LED_OFF = HIGH;
 
 void check_status(); // function definition (see function further below)
 
+void blink()
+{
+  for (int i = 0; i < 3; i++)
+  {
+    digitalWrite(LED_BUILTIN, LED_ON);
+    delay(100);
+    digitalWrite(LED_BUILTIN, LED_OFF);
+    delay(100);
+  }
+}
+
 void setup()
 {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -38,6 +49,7 @@ void check_status()
 {
   if (WiFi.status() == WL_CONNECTED)
   {
+//    blink();
     digitalWrite(LED_BUILTIN, LED_ON);
   }
   else
