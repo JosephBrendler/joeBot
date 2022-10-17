@@ -1,6 +1,16 @@
 
 This directory is intended for project header files.
 
+Note that if you have .gitignore set to ignore credentials.h in this folder,
+then if you clone this project, you will need to add the corresponding file
+with the following contents (example)
+
+----[ include/credentials.h ]-----------------
+  #ifndef mySSID
+  #define mySSID "enterSSIDhere"
+  #define myPASSWORD "enterPASSWORDhere"
+  #endif
+
 A header file is a file containing C declarations and macro definitions
 to be shared between several project source files. You request the use of a
 header file in your project source file (C, C++, etc) located in `src` folder
