@@ -26,7 +26,7 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LED_OFF);
   Serial.begin(115200);
-  Serial.println("Booting");
+  Serial.println("\n\nBooting...\n");
 
   setupOTA("JoeESP12_01", mySSID, myPASSWORD);   // use unique name each time
 
