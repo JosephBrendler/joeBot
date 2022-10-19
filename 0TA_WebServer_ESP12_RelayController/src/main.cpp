@@ -184,7 +184,7 @@ void handle_web_client()
             // Web Page Heading
             // ToDo - generalize for either ESP8266 *or* ESP32
             client.println("<body><h1>ESP8266 Relay Control Web Server</h1>");
-            client.println("<p>Adapted by Joe Brendler <a href=https://github.com/JosephBrendler/joeBot/tree/main/0TA_WebServer_ESP12_RelayController> GitHub/JosephBrendler </a> </p>");
+            client.println("<p>Adapted by Joseph Brendler <a href=https://github.com/JosephBrendler/joeBot/tree/main/0TA_WebServer_ESP12_RelayController> GitHub/JosephBrendler </a> </p>");
 
             // Display current state, and ON/OFF buttons for GPIO 15
             client.println("<p>Output 1 (GPIO " + String(output_1_) + ") - State: [" + output_1_State + "]</p>");
