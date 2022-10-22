@@ -43,9 +43,9 @@ only support faster but less secure ciphers  -- If you care more about security
 you won't want to do this, but if you need to maximize battery life, these
 may make sense.
 */
-void fetchCertAuthorityCustomCipherList()
+void fetchKnownKeyCaCertCustomCipherList()
 {
-  separator("fetchCertAuthorityCustomCipherList()");
+  separator("fetchKnownKeyCaCertCustomCipherList()");
   BearSSL::WiFiClientSecure client;
   BearSSL::PublicKey key(myPUBKEY);
   client.setKnownKey(&key);
@@ -72,12 +72,13 @@ void setup()
     delay(500);
     Serial.print(".");
   }
-  Serial.print("\nWiFi connected.  IP address: ");
+  Serial.print("\nWiFi connected on IP address: ");
   Serial.println(WiFi.localIP());
-  Serial.print("Setting NTP time...");
+
+  delay(500);
   setClock();
 
-  fetchCertAuthorityCustomCipherList();
+  fetchKnownKeyCaCertCustomCipherList();
 }
 
 void loop()
@@ -121,7 +122,7 @@ void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_
 
   ESP.resetFreeContStack();
   uint32_t freeStackStart = ESP.getFreeContStack();
-  Serial.printf("Trying: %s:443...", host);
+  Serial.printf("Trying: %s:%d...", host, port);
   client->connect(host, port);
   if (!client->connected())
   {
