@@ -1,8 +1,10 @@
 #include <WiFiClientSecure.h>
 #include <credentials.h>
 
-const char *ssid = "your_ssid";
-const char *password = "your_password";
+char HOST_NAME[16] = "thuvia";
+int HTTPS_PORT = 443;
+String HTTP_METHOD = "GET"; // or "POST"
+String PATH_NAME = "";
 
 // Given below is the CA Certificate of google.com. Replace it with the CA Certificate of your server
 const char *ca_cert =
@@ -42,12 +44,13 @@ const char *ca_cert =
     "-----END CERTIFICATE-----\n";
 
 WiFiClientSecure client;
+void SendGetata(); // dummy function declaration(s)
 
 void setup()
 {
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(mySSID, myPASSWORD);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
@@ -55,8 +58,8 @@ void setup()
   }
   Serial.println("");
   Serial.print("WiFi connected to: ");
-  Serial.println(ssid);
-  Serial.println("IP address: ");
+  Serial.println(mySSID);
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
   client.setCACert(ca_cert);
   delay(2000);
@@ -64,6 +67,23 @@ void setup()
 
 void loop()
 {
-  SendData("thuvia.brendler", 443);
+  SendGetata();
   delay(5000);
+}
+
+void SendGetata()
+{
+  if (client.connect(HOST_NAME, HTTPS_PORT))
+  {
+    Serial.println("Connected to " + String(HOST_NAME) + ":" + String(HTTPS_PORT));
+  }
+  else
+  {
+    Serial.println("connection failed");
+  }
+  // send HTTP request header
+  client.println(HTTP_METHOD + " " + PATH_NAME + " HTTP/1.1");
+  client.println("Host: " + String(HOST_NAME));
+  client.println("Connection: close");
+  client.println(); // end HTTP request header
 }
