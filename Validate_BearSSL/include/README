@@ -1,6 +1,14 @@
 
 This directory is intended for project header files.
 
+Note: this project needs four header files which will be excluded from the github
+repository by the .gitignore file, because they contain sensitive information about
+your network and associated credentials.  These are --
+  myNetworkInformation.h
+  myCert.h
+  myFingerprint.h
+  myPubKey.h
+
 A header file is a file containing C declarations and macro definitions
 to be shared between several project source files. You request the use of a
 header file in your project source file (C, C++, etc) located in `src` folder

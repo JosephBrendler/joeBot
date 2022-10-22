@@ -3,7 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-include/myCredentials.h
+include/myNetworkInformation.h
 include/myCert.h
 include/myPubKey.h
 include/myFingerprint.h
