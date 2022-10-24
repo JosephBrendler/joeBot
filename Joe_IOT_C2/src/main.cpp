@@ -1,14 +1,16 @@
-// Example of the different modes of the X.509 validation options
-// in the WiFiClientBearSSL object
-//
-// Mar 2018 by Earle F. Philhower, III
-// Released to the public domain
-// Adapted by Joe Brendler Oct 2022
+/*----------------------------------------------------------------------------------------------------
+  Use modes of the X.509 validation in the WiFiClientBearSSL object
+  to connect and exchange information with external web server
+  Joe Brendler Oct 2022
+  Based largley on Mar 2018 work by Earle F. Philhower, III - Released to the public domain
+----------------------------------------------------------------------------------------------------*/
 
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
 #include <StackThunk.h>
 #include <time.h>
+#include <Arduino_JSON.h>
+#include <ESP8266HTTPClient.h>
 #include "myNetworkInformation.h"
 
 const char *ssid = mySSID;
@@ -17,12 +19,92 @@ const char *path = myPATH;
 const char *SSL_host = mySSL_HOST;
 const int SSL_port = mySSL_PORT;
 
+// Used for millisecond count of timeouts (big integers)
+unsigned long lastTime = 0;
+// Timer set to 10 minutes (600000)
+// unsigned long timerDelay = 600000;
+// Set timer to 5 seconds (5000)
+unsigned long timerDelay = 5000;
+
 // Function dummy declarations (so I can move them below loop())
 void setClock();
 void separator(String msg);
 void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_t port, const char *path);
 
-/* Connect using a CA certificate and a custome cipher list --
+/*----------------------------------------------------------------------------------------------------
+Connect insecure (do not use except for testing pysical connectivity)
+This is absolutely *insecure*, but you can tell BearSSL not to check the
+certificate of the server.  In this mode it will accept ANY certificate,
+which is subject to man-in-the-middle (MITM) attacks. */
+void fetchInsecure()
+{
+  separator("fetchInsecure()");
+  BearSSL::WiFiClientSecure client;
+  client.setInsecure();
+  fetchURL(&client, SSL_host, SSL_port, path);
+}
+
+/*----------------------------------------------------------------------------------------------------
+Connect using the SHA-1 fingerprint to validate an X.509 certificate
+instead of using the whole certificate.  This is not nearly as secure as real
+X.509 validation, but is better than nothing.  Also be aware that these
+fingerprints will change if anything changes in the certificate chain
+(i.e. re-generating the certificate for a new end date, any updates to
+the root authorities, etc.).*/
+void fetchFingerprint()
+{
+  separator("fetchFingerprint()");
+  BearSSL::WiFiClientSecure client;
+  client.setFingerprint(myFINGERPRINT);
+  fetchURL(&client, SSL_host, SSL_port, path);
+}
+
+void fetchDataWithFingerprint()
+{
+  separator("fetchDataWithFingerprint()");
+  HTTPClient https;
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  //  BearSSL::WiFiClientSecure client;
+  client->setFingerprint(myFINGERPRINT);
+  Serial.print("[HTTPS] begin...\n");
+  if (https.begin(*client, myURL))
+  { // HTTPS
+
+    Serial.print("[HTTPS] GET...\n");
+    // start connection and send HTTP header
+    int httpCode = https.GET();
+
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTPS] GET... code: %d\n", httpCode);
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
+      {
+        String payload = https.getString();
+        Serial.println(payload);
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+    }
+
+    Serial.println("Done fetchDataWithFingerprint()");
+    delay(200);
+    https.end();
+    delay(200);
+  }
+  else
+  {
+    Serial.printf("[HTTPS] Unable to connect\n");
+  }
+}
+
+/*----------------------------------------------------------------------------------------------------
+Connect using a CA certificate and a custome cipher list --
 ** CA Certificate:  A specific certification authority can be passed in and used to validate
 a chain of certificates from a given server.  These will be validated
 using BearSSL's rules, which do NOT include certificate revocation lists.
@@ -43,7 +125,8 @@ void fetchCaCertCustomCipherList()
   fetchURL(&client, SSL_host, SSL_port, path);
 }
 
-/* Connect using a known key and a custome cipher list --
+/*----------------------------------------------------------------------------------------------------
+Connect using a known key and a custome cipher list --
 ** Known key:  The server certificate can be completely ignored, with its public key
 hardcoded in the application. This should be secure as the public key
 needs to be paired with the private key of the site, which is obviously
@@ -63,6 +146,7 @@ void fetchKnownKeyCustomCipherList()
   fetchURL(&client, SSL_host, SSL_port, path);
 }
 
+/*----------------------------------------------------------------------------------------------------*/
 void setup()
 {
   Serial.begin(115200);
@@ -83,16 +167,24 @@ void setup()
   delay(500);
   setClock();
   delay(500);
+  fetchInsecure();
+  delay(500);
+  fetchFingerprint();
+  delay(500);
+  fetchDataWithFingerprint();
+  delay(500);
   fetchKnownKeyCustomCipherList();
   delay(500);
   fetchCaCertCustomCipherList();
 }
 
+/*----------------------------------------------------------------------------------------------------*/
 void loop()
 {
   // Nothing to do here
 }
 
+/*----------------------------------------------------------------------------------------------------*/
 // Set time via NTP, as required for x.509 validation
 void setClock()
 {
@@ -114,12 +206,14 @@ void setClock()
   Serial.print(asctime(&timeinfo));
 }
 
+/*----------------------------------------------------------------------------------------------------*/
 // print a separator in Serial output, for readability
 void separator(String msg)
 {
-  Serial.println("----------[ " + msg + "]----------");
+  Serial.println("----------[ " + msg + " ]----------");
 }
 
+/*----------------------------------------------------------------------------------------------------*/
 // Try and connect using a WiFiClientBearSSL to specified host:port and dump HTTP response
 void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_t port, const char *path)
 {
