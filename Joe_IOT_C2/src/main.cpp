@@ -66,41 +66,42 @@ void fetchDataWithFingerprint()
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
   //  BearSSL::WiFiClientSecure client;
   client->setFingerprint(myFINGERPRINT);
-  Serial.print("[HTTPS] begin...\n");
+  //  fetchURL_for_C2(&https, &client, SSL_host, SSL_port, path);
+  Serial.print("[HTTPS] begin connection to url: " + String(myURL) + "\n");
   if (https.begin(*client, myURL))
   { // HTTPS
-
-    Serial.print("[HTTPS] GET...\n");
+    Serial.print("[HTTPS] Sending GET request...\n");
     // start connection and send HTTP header
     int httpCode = https.GET();
-
     // httpCode will be negative on error
     if (httpCode > 0)
     {
       // HTTP header has been send and Server response header has been handled
-      Serial.printf("[HTTPS] GET... code: %d\n", httpCode);
-
+      Serial.printf("[HTTPS] GET returns code: %d\n", httpCode);
       // file found at server
       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
       {
+        Serial.println("Requesting Command and Control instruction with getString() method...");
         String payload = https.getString();
-        Serial.println(payload);
+        Serial.println("Retrieved command: " + payload);
       }
     }
     else
     {
       Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
     }
-
-    Serial.println("Done fetchDataWithFingerprint()");
-    delay(200);
+    Serial.println("Done with payload...");
+    delay(2000);
+    client.release();
     https.end();
-    delay(200);
+    delay(2000);
+    Serial.println("ended https...");
   }
   else
   {
     Serial.printf("[HTTPS] Unable to connect\n");
   }
+  Serial.println("done with function...");
 }
 
 /*----------------------------------------------------------------------------------------------------
@@ -125,6 +126,53 @@ void fetchCaCertCustomCipherList()
   fetchURL(&client, SSL_host, SSL_port, path);
 }
 
+void fetchDataWithCaCertCustomCipherList()
+{
+  separator("fetchDataWithCaCertCustomCipherList()");
+  HTTPClient https;
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+//  BearSSL::WiFiClientSecure client;
+  BearSSL::X509List cert(myCERT);
+  client->setTrustAnchors(&cert); // Note: this method needs time to be set
+  client->setCiphers(myCustomCipherList);
+  //  fetchURL_for_C2(&https, &client, SSL_host, SSL_port, path);
+  Serial.print("[HTTPS] begin connection to url: " + String(myURL) + "\n");
+  if (https.begin(*client, myURL))
+  { // HTTPS
+    Serial.print("[HTTPS] Sending GET request...\n");
+    // start connection and send HTTP header
+    int httpCode = https.GET();
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTPS] GET returns code: %d\n", httpCode);
+      // file found at server
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
+      {
+        Serial.println("Requesting Command and Control instruction with getString() method...");
+        String payload = https.getString();
+        Serial.println("Retrieved command: " + payload);
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+    }
+    Serial.println("Done with payload...");
+    delay(2000);
+    client.release();
+    https.end();
+    delay(2000);
+    Serial.println("ended https...");
+  }
+  else
+  {
+    Serial.printf("[HTTPS] Unable to connect\n");
+  }
+  Serial.println("done with function...");
+}
+
 /*----------------------------------------------------------------------------------------------------
 Connect using a known key and a custome cipher list --
 ** Known key:  The server certificate can be completely ignored, with its public key
@@ -146,7 +194,56 @@ void fetchKnownKeyCustomCipherList()
   fetchURL(&client, SSL_host, SSL_port, path);
 }
 
-/*----------------------------------------------------------------------------------------------------*/
+void fetchDataWithKnownKeyCustomCipherList()
+{
+  separator("fetchDataWithKnownKeyCustomCipherList()");
+  HTTPClient https;
+  std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  BearSSL::PublicKey key(myPUBKEY);
+  client->setKnownKey(&key);
+  client->setCiphers(myCustomCipherList);
+  //fetchURL(&client, SSL_host, SSL_port, path);
+  Serial.print("[HTTPS] begin connection to url: " + String(myURL) + "\n");
+  if (https.begin(*client, myURL))
+  { // HTTPS
+    Serial.print("[HTTPS] Sending GET request...\n");
+    // start connection and send HTTP header
+    int httpCode = https.GET();
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTPS] GET returns code: %d\n", httpCode);
+      // file found at server
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
+      {
+        Serial.println("Requesting Command and Control instruction with getString() method...");
+        String payload = https.getString();
+        Serial.println("Retrieved command: " + payload);
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+    }
+    Serial.println("Done with payload...");
+    delay(2000);
+    client.release();
+    https.end();
+    delay(2000);
+    Serial.println("ended https...");
+  }
+  else
+  {
+    Serial.printf("[HTTPS] Unable to connect\n");
+  }
+  Serial.println("done with function...");
+}
+
+/*----------------------------------------------------------------------------------------------------
+ * setup()
+ *
+ *---------------------------------------------------------------------------------------------------*/
 void setup()
 {
   Serial.begin(115200);
@@ -167,18 +264,14 @@ void setup()
   delay(500);
   setClock();
   delay(500);
-  fetchInsecure();
-  delay(500);
-  fetchFingerprint();
-  delay(500);
-  fetchDataWithFingerprint();
-  delay(500);
-  fetchKnownKeyCustomCipherList();
-  delay(500);
-  fetchCaCertCustomCipherList();
+
+  fetchDataWithKnownKeyCustomCipherList();
 }
 
-/*----------------------------------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------------------------------
+ * loop()
+ *
+ *---------------------------------------------------------------------------------------------------*/
 void loop()
 {
   // Nothing to do here
@@ -224,7 +317,7 @@ void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_
 
   ESP.resetFreeContStack();
   uint32_t freeStackStart = ESP.getFreeContStack();
-  Serial.printf("Trying: %s:%d...", host, port);
+  Serial.printf("Trying: %s:%d%s...", host, port, path);
   client->connect(host, port);
   if (!client->connected())
   {
