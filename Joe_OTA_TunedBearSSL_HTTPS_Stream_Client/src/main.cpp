@@ -15,6 +15,7 @@
 #include <ESP8266HTTPClient.h>
 #include "myNetworkInformation.h"
 #include "OTA_Joe2.h"
+#include <stdio.h>
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
@@ -22,6 +23,7 @@ const char *esp_host = myESP_HOST;
 const char *SSL_host = mySSL_HOST;
 const int SSL_port = mySSL_PORT;
 const char *path = myPATH;
+const char *protocol = myPROTOCOL;
 
 const int LED_ON = LOW; // ctive high for ESP32; ESP12 8266 is active low)
 const int LED_OFF = HIGH;
@@ -33,6 +35,9 @@ void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_
 void check_status();
 void fetchDataWithKnownKeyCustomCipherList();
 void blink();
+char *build_url(const char *proto, const char *host, const int port, const char *path);
+
+const char *myURL = build_url(protocol, SSL_host, SSL_port, path);
 
 /*----------------------------------------------------------------------------------------------------
  * setup()
@@ -52,8 +57,8 @@ void setup()
   check_status();
 
   // set NTP time (needed for CA Cert expiry validation)
-  delay(100);
-  setClock();
+  // delay(100);
+  // setClock();
   delay(100);
   Serial.println();
   fetchDataWithKnownKeyCustomCipherList();
@@ -203,6 +208,14 @@ void fetchDataWithKnownKeyCustomCipherList()
   separator("fetchDataWithKnownKeyCustomCipherList()");
   HTTPClient https;
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+  bool mfln = client->probeMaxFragmentLength(SSL_host, 443, 1024);
+  Serial.printf("\nConnecting to %s\n", SSL_host);
+  Serial.printf("Maximum fragment Length negotiation supported: %s\n", mfln ? "yes" : "no");
+  if (mfln)
+  {
+    client->setBufferSizes(1024, 1024);
+  }
+
   /* Options for securing vs MITM --
     (1) fingerprint of server cert
     (2) ca cert (needs NTP time)
@@ -228,27 +241,70 @@ void fetchDataWithKnownKeyCustomCipherList()
       Serial.printf("[HTTPS] GET returns code: %d (%s)\n\n", httpCode, https.errorToString(httpCode).c_str());
 
       // file found at server
-      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
+      if (httpCode == HTTP_CODE_OK)
       {
-        Serial.println("Requesting Command and Control instruction with getString() method...");
-        String payload = https.getString();
-        Serial.println("Retrieved command: " + payload);
+
+        // get length of document (is -1 when Server sends no Content-Length header)
+        int len = https.getSize();
+
+        // create buffer for read
+        static uint8_t buff[128] = {0};
+
+        // read all data from server
+        while (https.connected() && (len > 0 || len == -1))
+        {
+          // get available data size
+          size_t size = client->available();
+
+          if (size)
+          {
+            // read up to 128 byte
+            int c = client->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+
+            // write it to Serial
+            Serial.write(buff, c);
+
+            if (len > 0)
+            {
+              len -= c;
+            }
+          }
+          delay(1);
+        }
+
+        Serial.println();
+        Serial.print("[HTTPS] connection closed or file end.\n");
       }
+      else
+      {
+        Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+      }
+
+      Serial.println("Done with payload...");
+      delay(100);
+      client.release();
+      https.end();
+      delay(100);
+      Serial.println("ended https...");
     }
     else
     {
-      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+      Serial.printf("[HTTPS] Unable to connect\n");
     }
-    Serial.println("Done with payload...");
-    delay(100);
-    client.release();
-    https.end();
-    delay(100);
-    Serial.println("ended https...");
+    Serial.println("done with function...");
   }
-  else
-  {
-    Serial.printf("[HTTPS] Unable to connect\n");
-  }
-  Serial.println("done with function...");
+}
+
+char *build_url(const char *proto, const char *host, const int port, const char *path)
+{
+  // allocate memory for url characters -- note the number of
+  // digits in an integer is {log(base)(integer) + 1} and the
+  // char[] must be terminated with a '\0' char, so again + 1
+  int url_size = strlen(protocol) + 3 +strlen(host) + (log10(port) + 1) + strlen(path) + 1;
+
+  char *result = new char[url_size];
+
+  // initialize result with all chars in host[] colon and path[]
+  sprintf(result, "%s://%s:%d%s", protocol, host, port, path);
+  return result;
 }
