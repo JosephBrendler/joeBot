@@ -5,8 +5,6 @@
   Based largley on Mar 2018 work by Earle F. Philhower, III - Released to the public domain
 ----------------------------------------------------------------------------------------------------*/
 
-// ToDo -  update to stream
-
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
 #include <StackThunk.h>
@@ -300,7 +298,7 @@ char *build_url(const char *proto, const char *host, const int port, const char 
   // allocate memory for url characters -- note the number of
   // digits in an integer is {log(base)(integer) + 1} and the
   // char[] must be terminated with a '\0' char, so again + 1
-  int url_size = strlen(protocol) + 3 +strlen(host) + (log10(port) + 1) + strlen(path) + 1;
+  int url_size = strlen(protocol) + 3 + strlen(host) + (log10(port) + 1) + strlen(path) + 1;
 
   char *result = new char[url_size];
 

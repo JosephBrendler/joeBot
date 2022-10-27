@@ -5,12 +5,8 @@
   Based largley on Mar 2018 work by Earle F. Philhower, III - Released to the public domain
 ----------------------------------------------------------------------------------------------------*/
 
-// ToDo -  update to stream
-
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
-#include <StackThunk.h>
-#include <time.h>
 #include <Arduino_JSON.h>
 #include <ESP8266HTTPClient.h>
 #include "myNetworkInformation.h"
@@ -137,61 +133,6 @@ void blink()
   }
 }
 
-/*----------------------------------------------------------------------------------------------------*/
-// Try and connect using a WiFiClientBearSSL to specified host:port and dump HTTP response
-void fetchURL(BearSSL::WiFiClientSecure *client, const char *host, const uint16_t port, const char *path)
-{
-  if (!path)
-  {
-    path = "/";
-  }
-
-  ESP.resetFreeContStack();
-  uint32_t freeStackStart = ESP.getFreeContStack();
-  Serial.printf("Trying: %s:%d%s...", host, port, path);
-  client->connect(host, port);
-  if (!client->connected())
-  {
-    Serial.printf("*** Can't connect. ***\n-------\n");
-    return;
-  }
-  Serial.printf("Connected!\n-------\n");
-  client->write("GET ");
-  client->write(path);
-  client->write(" HTTP/1.0\r\nHost: ");
-  client->write(host);
-  client->write("\r\nUser-Agent: ESP8266\r\n");
-  client->write("\r\n");
-  uint32_t to = millis() + 5000;
-  if (client->connected())
-  {
-    do
-    {
-      char tmp[32];
-      memset(tmp, 0, 32);
-      int rlen = client->read((uint8_t *)tmp, sizeof(tmp) - 1);
-      yield();
-      if (rlen < 0)
-      {
-        break;
-      }
-      // Only print out first line up to \r, then abort connection
-      char *nl = strchr(tmp, '\r');
-      if (nl)
-      {
-        *nl = 0;
-        Serial.print(tmp);
-        break;
-      }
-      Serial.print(tmp);
-    } while (millis() < to);
-  }
-  client->stop();
-  uint32_t freeStackEnd = ESP.getFreeContStack();
-  Serial.printf("\nCONT stack used: %d\n", freeStackStart - freeStackEnd);
-  Serial.printf("BSSL stack used: %d\n-------\n\n", stack_thunk_get_max_usage());
-}
-
 /*----------------------------------------------------------------------------------------------------
 Connect using a known key and a custome cipher list --
 ** Known key:  The server certificate can be completely ignored, with its public key
@@ -208,14 +149,6 @@ void fetchDataWithKnownKeyCustomCipherList()
   separator("fetchDataWithKnownKeyCustomCipherList()");
   HTTPClient https;
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-  bool mfln = client->probeMaxFragmentLength(SSL_host, 443, 1024);
-  Serial.printf("\nConnecting to %s\n", SSL_host);
-  Serial.printf("Maximum fragment Length negotiation supported: %s\n", mfln ? "yes" : "no");
-  if (mfln)
-  {
-    client->setBufferSizes(1024, 1024);
-  }
-
   /* Options for securing vs MITM --
     (1) fingerprint of server cert
     (2) ca cert (needs NTP time)
@@ -241,58 +174,30 @@ void fetchDataWithKnownKeyCustomCipherList()
       Serial.printf("[HTTPS] GET returns code: %d (%s)\n\n", httpCode, https.errorToString(httpCode).c_str());
 
       // file found at server
-      if (httpCode == HTTP_CODE_OK)
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
       {
-
-        // get length of document (is -1 when Server sends no Content-Length header)
-        int len = https.getSize();
-
-        // create buffer for read
-        static uint8_t buff[128] = {0};
-
-        // read all data from server
-        while (https.connected() && (len > 0 || len == -1))
-        {
-          // get available data size
-          size_t size = client->available();
-
-          if (size)
-          {
-            // read up to 128 byte
-            int c = client->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-
-            // write it to Serial
-            Serial.write(buff, c);
-
-            if (len > 0)
-            {
-              len -= c;
-            }
-          }
-          delay(1);
-        }
-
-        Serial.println();
-        Serial.print("[HTTPS] connection closed or file end.\n");
+        Serial.println("Requesting Command and Control instruction with getString() method...");
+        String payload = https.getString();
+        Serial.println("Retrieved command: " + payload);
       }
-      else
-      {
-        Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
-      }
-
-      Serial.println("Done with payload...");
-      delay(100);
-      client.release();
-      https.end();
-      delay(100);
-      Serial.println("ended https...");
     }
     else
     {
-      Serial.printf("[HTTPS] Unable to connect\n");
+      Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
     }
-    Serial.println("done with function...");
+
+    Serial.println("Done with payload...");
+    delay(100);
+    client.release();
+    https.end();
+    delay(100);
+    Serial.println("ended https...");
   }
+  else
+  {
+    Serial.printf("[HTTPS] Unable to connect\n");
+  }
+  Serial.println("done with function...");
 }
 
 char *build_url(const char *proto, const char *host, const int port, const char *path)
@@ -300,7 +205,7 @@ char *build_url(const char *proto, const char *host, const int port, const char 
   // allocate memory for url characters -- note the number of
   // digits in an integer is {log(base)(integer) + 1} and the
   // char[] must be terminated with a '\0' char, so again + 1
-  int url_size = strlen(protocol) + 3 +strlen(host) + (log10(port) + 1) + strlen(path) + 1;
+  int url_size = strlen(protocol) + 3 + strlen(host) + (log10(port) + 1) + strlen(path) + 1;
 
   char *result = new char[url_size];
 
