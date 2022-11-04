@@ -13,7 +13,7 @@ Based largley on Mar 2018 work by Earle F. Philhower, III - Released to the publ
 #include "OTA_Joe2.h"
 #include <stdio.h>
 
-#define timeInterval 7   // used to define period of motion-insensitivity after trigger
+#define timeInterval 7 // used to define period of motion-insensitivity after trigger
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
@@ -34,7 +34,6 @@ const int motionSensor = 27;
 time_t timeNow = time(nullptr);
 struct tm timeinfo;
 char *timeStamp;
-
 
 // Timer: Auxiliary variables
 unsigned long now = millis();
@@ -89,16 +88,14 @@ void setup()
   delay(100);
   timeStamp = getTime();
   delay(100);
-  Serial.println("Current time: " + String(timeStamp));
+  Serial.printf("Current time: %s", timeStamp);
 
   const char *message = "ESP32 Motion Sensor Initialized";
-  Serial.printf("timeStamp: %s reading = ", timeStamp);
-  Serial.printf("%s \nAbout to asign data_constructor...\n", message);
   int data_len = strlen(timeStamp) + 12 + strlen(message) + 1;
   char *data_chars = new char[data_len];
   sprintf(data_chars, "%s: %s\n", timeStamp, message);
 
-  Serial.println("about to call uploadData...");
+  Serial.printf("about to call uploadData with data [%s]\n", data_chars);
   uploadDataWithKnownKey(data_chars);
 
   blink(OTA_LED);
@@ -149,7 +146,6 @@ void loop()
 
   // Remainder of routine loop code here
 
-
   check_status();
 }
 
@@ -175,7 +171,8 @@ char *getTime()
   timeNow = time(nullptr);
   configTime(int(3 * 60 * 60), 0, "time.nist.gov", "pool.ntp.org");
   Serial.print("Waiting for NTP time sync: ");
-  while (timeNow < 8 * 3600 * 2)
+  // while (timeNow < 8 * 3600 * 2)
+  while (!time)
   {
     delay(4010); // systems that query for time more frequently than every 4 sec will be refused service
     Serial.print(".");
@@ -324,7 +321,7 @@ void uploadDataWithKnownKey(char *myDATA)
       {
         Serial.println("Data upload succeeded...");
         String payload = https.getString();
-//        Serial.println("Response to getString(): " + payload);
+        //        Serial.println("Response to getString(): " + payload);
       }
     }
     else
