@@ -20,7 +20,8 @@ const char *pass = myPASSWORD;
 const char *esp_host = myESP_HOST;
 const char *SSL_host = mySSL_HOST;
 const int SSL_port = mySSL_PORT;
-const char *path = myPATH;
+const char *logPath = myLogFormPATH;
+const char *statusPath = myStatusFormPATH;
 const char *protocol = myPROTOCOL;
 
 const int OTA_LED = LED_BUILTIN;
@@ -34,6 +35,26 @@ const int motionSensor = 27;
 time_t timeNow = time(nullptr);
 struct tm timeinfo;
 char *timeStamp;
+
+int data_len = 0;
+const char *i_log_message = "ESP32 Motion Sensor Initialized";
+const char *i_status_message = "Initialized";
+const char *det_log_message = "Motion Detected!";
+const char *det_status_message = "Detected!";
+const char *down_log_message = "Motion stopped...";
+const char *down_status_message = "Stopped";
+
+const long gmtOffset_sec = (-5 * 3600);
+const int daylightOffset_sec = 3600;
+const char *ntpServer1 = "time.nist.gov";
+const char *ntpServer2 = "pool.ntp.org";
+
+int day = 0;
+int month = 0;
+int year = 0;
+int hours = 0;
+int minutes = 0;
+int seconds = 0;
 
 // Timer: Auxiliary variables
 unsigned long now = millis();
@@ -49,15 +70,19 @@ void IRAM_ATTR detectsMovement()
 }
 
 // dummy function declarations (so I can move the actual functions below setup() and loop())
-char *getTime();
+void setMyTime();
+void printLocalTime();
+char *getTimeStamp();
 void separator(String msg);
 void check_status();
 void fetchDataWithKnownKey();
-void uploadDataWithKnownKey(char *myDATA);
+void uploadDataWithKnownKey(const char *uploadURL, const char *fieldName, char *myDATA);
+// void uploadDataWithKnownKey(char *myDATA);
 void blink(int LED);
-char *build_url(const char *proto, const char *host, const int port, const char *path);
+char *build_url(const char *proto, const char *host, const int port, const char *logPath);
 
-const char *myURL = build_url(protocol, SSL_host, SSL_port, path);
+const char *myLogURL = build_url(protocol, SSL_host, SSL_port, logPath);
+const char *myStatusURL = build_url(protocol, SSL_host, SSL_port, statusPath);
 
 /*----------------------------------------------------------------------------------------------------
  * setup()
@@ -85,18 +110,28 @@ void setup()
   check_status();
 
   // set NTP time (needed for CA Cert expiry validation)
-  delay(100);
-  timeStamp = getTime();
-  delay(100);
-  Serial.printf("Current time: %s", timeStamp);
+  printLocalTime();
+  setMyTime();
+  printLocalTime();
 
-  const char *message = "ESP32 Motion Sensor Initialized";
-  int data_len = strlen(timeStamp) + 12 + strlen(message) + 1;
-  char *data_chars = new char[data_len];
-  sprintf(data_chars, "%s: %s\n", timeStamp, message);
+  // initialize timestamp
+  delay(100);
+  timeStamp = getTimeStamp();
+  //  Serial.printf("Current time: %s", timeStamp);
 
-  Serial.printf("about to call uploadData with data [%s]\n", data_chars);
-  uploadDataWithKnownKey(data_chars);
+  data_len = strlen(timeStamp) + 12 + strlen(i_log_message) + 1;
+  char *il_data_chars = new char[data_len];
+  sprintf(il_data_chars, "%s --> %s\n", timeStamp, i_log_message);
+
+  Serial.printf("about to call uploadData with data: %s", il_data_chars);
+  uploadDataWithKnownKey(myLogURL, "reading", il_data_chars);
+
+  data_len = strlen(i_status_message) + 1;
+  char *is_data_chars = new char[data_len];
+  sprintf(is_data_chars, "%s\n", i_status_message);
+
+  Serial.printf("about to call uploadData with data: %s", is_data_chars);
+  uploadDataWithKnownKey(myStatusURL, "status", is_data_chars);
 
   blink(OTA_LED);
   check_status();
@@ -115,18 +150,24 @@ void loop()
   // safely handle interrupt flag, if it is set (don't put this kind of code in the interrupt itself)
   if (triggered)
   {
-    const char *message = "Motion Detected!";
-    Serial.println(message);
+    Serial.println(det_log_message);
     lastTrigger = millis();
     digitalWrite(trigger_led, HIGH);
     startTimer = true;
     triggered = false;
 
-    timeStamp = getTime();
-    int data_len = strlen(timeStamp) + 2 + strlen(message) + 1;
-    char *data_chars = new char[data_len];
-    sprintf(data_chars, "%s: %s\n", timeStamp, message);
-    uploadDataWithKnownKey(data_chars);
+    timeStamp = getTimeStamp();
+    data_len = strlen(timeStamp) + 2 + strlen(det_log_message) + 1;
+    char *dl_data_chars = new char[data_len];
+    sprintf(dl_data_chars, "%s --> %s\n", timeStamp, det_log_message);
+    uploadDataWithKnownKey(myLogURL, "reading", dl_data_chars);
+
+    data_len = strlen(det_status_message) + 1;
+    char *ds_data_chars = new char[data_len];
+    sprintf(ds_data_chars, "%s\n", det_status_message);
+
+    Serial.printf("about to call uploadData with data: %s", ds_data_chars);
+    uploadDataWithKnownKey(myStatusURL, "status", ds_data_chars);
   }
   // Current time
   now = millis();
@@ -134,14 +175,20 @@ void loop()
   if (startTimer && (now - lastTrigger > (timeInterval * 1000)))
   {
     startTimer = false;
-    timeStamp = getTime();
+    timeStamp = getTimeStamp();
     digitalWrite(trigger_led, LOW);
-    const char *message = "Motion stopped...";
-    Serial.println(message);
-    int data_len = strlen(timeStamp) + 2 + strlen(message) + 1;
-    char *data_chars = new char[data_len];
-    sprintf(data_chars, "%s: %s\n", timeStamp, message);
-    uploadDataWithKnownKey(data_chars);
+    Serial.println(down_log_message);
+    data_len = strlen(timeStamp) + 2 + strlen(down_log_message) + 1;
+    char *sl_data_chars = new char[data_len];
+    sprintf(sl_data_chars, "%s --> %s\n", timeStamp, down_log_message);
+    uploadDataWithKnownKey(myLogURL, "reading", sl_data_chars);
+
+    data_len = strlen(down_status_message) + 1;
+    char *ss_data_chars = new char[data_len];
+    sprintf(ss_data_chars, "%s\n", down_status_message);
+
+    Serial.printf("about to call uploadData with data: %s", ss_data_chars);
+    uploadDataWithKnownKey(myStatusURL, "status", ss_data_chars);
   }
 
   // Remainder of routine loop code here
@@ -162,27 +209,6 @@ void check_status()
     digitalWrite(OTA_LED, OTA_LED_OFF);
   }
   delay(100);
-}
-
-/*----------------------------------------------------------------------------------------------------*/
-// Set time via NTP, as required for x.509 validation
-char *getTime()
-{
-  timeNow = time(nullptr);
-  configTime(int(3 * 60 * 60), 0, "time.nist.gov", "pool.ntp.org");
-  Serial.print("Waiting for NTP time sync: ");
-  // while (timeNow < 8 * 3600 * 2)
-  while (!time)
-  {
-    delay(4010); // systems that query for time more frequently than every 4 sec will be refused service
-    Serial.print(".");
-    timeNow = time(nullptr);
-  }
-  Serial.println("");
-  gmtime_r(&timeNow, &timeinfo);
-  //  Serial.print("Current time: ");
-  //  Serial.print(asctime(&timeinfo));
-  return asctime(&timeinfo);
 }
 
 /*----------------------------------------------------------------------------------------------------*/
@@ -230,9 +256,9 @@ void fetchDataWithKnownKey()
   //  client->setTrustAnchors(&cert); // Note: this method needs time to be set
     (using known key)  */
   client.setCertificate(myPUBKEY);
-  // fetchURL(&client, SSL_host, SSL_port, path);
-  Serial.print("[HTTPS] begin connection to url: " + String(myURL) + "\n");
-  if (https.begin(myURL))
+  // fetchURL(&client, SSL_host, SSL_port, logPath);
+  Serial.print("[HTTPS] begin connection to url: " + String(myLogURL) + "\n");
+  if (https.begin(myLogURL))
   { // HTTPS
     Serial.print("[HTTPS] Sending GET request...\n");
     // start connection and send HTTP header
@@ -281,9 +307,9 @@ able to establish communications.
 only support faster but less secure ciphers  -- If you care more about security
 you won't want to do this, but if you need to maximize battery life, these
 may make sense. */
-void uploadDataWithKnownKey(char *myDATA)
+void uploadDataWithKnownKey(const char *uploadURL, const char *fieldName, char *myDATA)
 {
-  separator("uploadDataWithKnownKeyCustomCipherList()");
+  separator("uploadDataWithKnownKey()");
   HTTPClient https;
   WiFiClientSecure client;
   /* Options for securing vs MITM --
@@ -295,17 +321,20 @@ void uploadDataWithKnownKey(char *myDATA)
   //  client->setTrustAnchors(&cert); // Note: this method needs time to be set
     (using known key)  */
   client.setCertificate(myPUBKEY);
-  // fetchURL(&client, SSL_host, SSL_port, path);
-  Serial.print("[HTTPS] begin connection to url: " + String(myURL) + "\n");
+  // fetchURL(&client, SSL_host, SSL_port, logPath);
+  Serial.print("[HTTPS] begin connection to url: " + String(uploadURL) + "\n");
 
   struct tm timeinfo;
   gmtime_r(&timeNow, &timeinfo);
 
-  String postData = "reading=" + String(asctime(&timeinfo)) + String(myDATA);
+  // note: "fieldName" identifies the name of the form field we are POSTing to
+  String postData = String(fieldName) + "=" + String(myDATA);
 
-  if (https.begin(myURL))
+  if (https.begin(uploadURL))
   { // HTTPS
-    Serial.printf("[HTTPS] Sending POST request with data [%s]\n", myDATA);
+    Serial.print("[HTTPS] Sending POST request with data [");
+    Serial.print(postData);
+    Serial.println("]");
 
     https.addHeader("Content-Type", "application/x-www-form-urlencoded");
     // start connection and send HTTP header
@@ -320,7 +349,7 @@ void uploadDataWithKnownKey(char *myDATA)
       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
       {
         Serial.println("Data upload succeeded...");
-        String payload = https.getString();
+        //        String payload = https.getString();
         //        Serial.println("Response to getString(): " + payload);
       }
     }
@@ -343,16 +372,82 @@ void uploadDataWithKnownKey(char *myDATA)
   Serial.println("done with function...");
 }
 
-char *build_url(const char *proto, const char *host, const int port, const char *path)
+char *build_url(const char *proto, const char *host, const int port, const char *logPath)
 {
   // allocate memory for url characters -- note the number of
   // digits in an integer is {log(base)(integer) + 1} and the
   // char[] must be terminated with a '\0' char, so again + 1
-  int url_size = strlen(protocol) + 3 + strlen(host) + (log10(port) + 1) + strlen(path) + 1;
+  int url_size = strlen(protocol) + 3 + strlen(host) + (log10(port) + 1) + strlen(logPath) + 1;
 
   char *result = new char[url_size];
 
-  // initialize result with all chars in host[] colon and path[]
-  sprintf(result, "%s://%s:%d%s", protocol, host, port, path);
+  // initialize result with all chars in host[] colon and logPath[]
+  sprintf(result, "%s://%s:%d%s", protocol, host, port, logPath);
   return result;
+}
+
+/*----------------------------------------------------------------------------------------------------*/
+// set clock from NTP (as required for validation of x.509 CA Certificate vs expiration
+void setMyTime()
+{
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
+  // while (time(nullptr) < 8 * 3600)
+  while (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    delay(5000);
+  }
+}
+
+/*----------------------------------------------------------------------------------------------------*/
+// Print UTC and Local Time
+void printLocalTime()
+{
+  time(&timeNow);
+  Serial.printf("timeNow.: Coordinated Universal Time is %s", asctime(gmtime(&timeNow)));
+  gmtime_r(&timeNow, &timeinfo);
+  Serial.print("timeinfo: Coordinated Universal Time is ");
+  //  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  Serial.println(&timeinfo, "%a %b %d %H:%M:%S %Y");
+  Serial.print("timeinfo: ............ my Local Time is ");
+  localtime_r(&timeNow, &timeinfo);
+  Serial.println(&timeinfo, "%a %b %d %H:%M:%S %Y");
+  // hours = timeinfo.tm_hour;
+  hours = (timeinfo.tm_hour % 12);
+  minutes = timeinfo.tm_min;
+  seconds = timeinfo.tm_sec;
+  Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
+}
+
+/*----------------------------------------------------------------------------------------------------*/
+// return a timestamp
+char *getTimeStamp()
+{
+  int stamp_length = 0;
+
+  time(&timeNow);
+  gmtime_r(&timeNow, &timeinfo);
+
+  year = timeinfo.tm_year + 1900;
+  month = timeinfo.tm_mon;
+  day = timeinfo.tm_mday;
+  hours = timeinfo.tm_hour;
+  minutes = timeinfo.tm_min;
+  seconds = timeinfo.tm_sec;
+
+  // the string-length of an integer is log(base) + 1
+  stamp_length = log10(hours) + 1;
+  stamp_length += log10(minutes) + 1;
+  stamp_length += log10(seconds) + 1;
+  stamp_length += log10(year) + 1;
+  stamp_length += log10(month) + 1;
+  stamp_length += log10(day) + 1;
+  stamp_length += 3; // 2 x ':' + 1 x [space]
+
+  char *result = new char[stamp_length];
+  sprintf(result, "%4d%02d%02d %02d:%02d:%02d", year, month, day, hours, minutes, seconds);
+  // Serial.printf("year: %4d\n", year);
+  // Serial.printf("result: %s\n", result);
+  return result;
+  // return asctime(&timeinfo);
 }
