@@ -7,3 +7,4 @@ include/myNetworkInformation.h
 include/myCert.h
 include/myPubKey.h
 include/myFingerprint.h
+OTA_credentials.ini
