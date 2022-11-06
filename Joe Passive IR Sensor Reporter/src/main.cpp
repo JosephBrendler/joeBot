@@ -13,7 +13,7 @@ Based largley on Mar 2018 work by Earle F. Philhower, III - Released to the publ
 #include "OTA_Joe2.h"
 #include <stdio.h>
 
-#define timeInterval 7 // used to define period of motion-insensitivity after trigger
+#define timeInterval 15 // used to define to keep output (e.g. relay) "on" after trigger
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
