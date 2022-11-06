@@ -7,4 +7,4 @@ include/myNetworkInformation.h
 include/myCert.h
 include/myPubKey.h
 include/myFingerprint.h
-platformio.ini
+OTA_credentials.ini
