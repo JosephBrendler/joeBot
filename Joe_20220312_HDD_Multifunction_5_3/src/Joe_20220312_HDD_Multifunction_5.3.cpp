@@ -15,7 +15,8 @@ const int photoTrigger   = PD3; // D3  = PD3 (external interrupt 1) - sync
 const int fn_bit_0 = PD4;       // D4  = PD4 2^0 = 1
 const int fn_bit_1 = PD5;       // D5  = PD5 2^1 = 2
 const int fn_bit_2 = PD6;       // D6  = PD6 2^2 = 4
-const int checkerNumber_pin = 0;  // A0 (ToDo: convert to ADC0)
+const int fn_bit_3 = PD7;       // D7  = PD7 2^3 = 8
+const int checkerNumber_pin = 0; // A0 (ToDo: convert to ADC0)
 
 int pattern = 0;
 int checkerNumber = 0;
@@ -61,6 +62,20 @@ const unsigned int intervalOn = (unsigned int)(clockSlotWidth / 3);  // draw ski
 
 int i = 0, j = 0;              // integer loop counters
 
+//------[ function declarations ]-----------------------------------------------
+ISR(TIMER1_COMPA_vect);
+void set_loop_fn();
+void trigger();
+void calculateClockFace();
+void blink();
+void loop_fn_clock();
+void loop_fn_radar();
+void loop_fn_RedBlack();
+void loop_fn_colors();
+void loop_fn_checkers();
+void loop_fn_checker_colors();
+void loop_fn_fan();
+
 /*------------------------------------------------------------------------------
    setup()
   ------------------------------------------------------------------------------*/
@@ -92,13 +107,13 @@ void setup()
   DDRB |= ((1 << redLED) | (1 << greenLED) | (1 << blueLED));
 
   // set pinmode of pb_fn_activate, photoTrigger, and fn_bit_x pins as INPUT
-  DDRD &= ~( (1 << pb_fn_activate) | \
-             (1 << photoTrigger) | \
-             (1 << fn_bit_2) | (1 << fn_bit_1) | (1 << fn_bit_0) );
+  DDRD &= ~((1 << pb_fn_activate) |
+            (1 << photoTrigger) |
+            (1 << fn_bit_3) | (1 << fn_bit_2) | (1 << fn_bit_1) | (1 << fn_bit_0));
   // enable pullups on all INPUT pins
-  PORTD |= ( (1 << pb_fn_activate) | \
-             (1 << photoTrigger) | \
-             (1 << fn_bit_2) | (1 << fn_bit_1) | (1 << fn_bit_0) );
+  PORTD |= ((1 << pb_fn_activate) |
+            (1 << photoTrigger) |
+            (1 << fn_bit_3) | (1 << fn_bit_2) | (1 << fn_bit_1) | (1 << fn_bit_0));
   //PORTD &= ~(1 << photoTrigger); // disable pullup
   // attach photoTrigger as an interrupt
   attachInterrupt(digitalPinToInterrupt(photoTrigger), trigger, FALLING);
@@ -134,10 +149,21 @@ void setup()
    set_loop_fn() -- called by setup and by interrupt
   ------------------------------------------------------------------------------*/
 void set_loop_fn() {
-  pattern = ((PIND & 0b01110000) >> 4);  // function pins are PD6:4
+  pattern = ((PIND & 0b11110000) >> 4); // function pins are PD7:4 ; mask and shift right 4
+  pattern = (0b1111 & ~pattern);        // convert active LOW; is 32 bit int, so mask bitwise NOT
   ACTIVATED = true;
-  //Serial.print("pattern: ");
-  //Serial.println(pattern, BIN);
+  Serial.print("pattern (BIN): ");
+  Serial.println(pattern, BIN);
+  Serial.print("pattern (DEC): ");
+  Serial.println(pattern, DEC);
+  //Serial.print("~pattern (BIN): ");
+  //Serial.println(~pattern, BIN);
+  //Serial.print("~pattern (DEC): ");
+  //Serial.println(~pattern, DEC);
+  //Serial.print("0b1111 & ~pattern (BIN): ");
+  //Serial.println(0b1111 & ~pattern, BIN);
+  //Serial.print("0b1111 & ~pattern (DEC): ");
+  //Serial.println(0b1111 & ~pattern, DEC);
 }
 
 /*------------------------------------------------------------------------------
@@ -449,7 +475,6 @@ void loop_fn_checkers() {
   unsigned int periodTicks = 21995;  // empirically determined for CS2:0 = 010
   //  unsigned int radarSlot = ( periodTicks / 8 ) + adjustmentFactor;    // also in ticks
   unsigned int radarSlot = ( periodTicks / 8 );    // default; also in ticks
-  int slotColor = 0;
   OCR1A = radarSlot;   // fire 8 times per disk rotation
   // clear leds
   PORTB &= ~((1 << redLED) | (1 << greenLED) | (1 << blueLED));
@@ -568,6 +593,7 @@ void loop_fn_fan() {
 void loop()
 {
   ACTIVATED = false;
+  // Note: pattern bits are active low, so take the bitwise NOT of pattern
   switch (pattern) {
     case 0:
       //Serial.println("Executing clock function");
@@ -596,6 +622,7 @@ void loop()
     case 6:
       loop_fn_fan();
       break;
+    // with current hardware (10 pos. rotary fn switch), cases 7, 8, 9 fall to default
     default:
       loop_fn_clock();
       break;
