@@ -144,6 +144,7 @@ void loop()
     startTimer = true;
     triggered = false;
     interruptCount++;
+    Serial.printf("Interrupt# [%d] just received\n", interruptCount);
   }
   // Current time
   now = millis();
@@ -151,11 +152,12 @@ void loop()
   if (startTimer && (now - lastTrigger > (timeInterval * 1000)))
   {
     startTimer = false;
-    Serial.printf("Current interrupt count: %d", interruptCount);
+    Serial.printf("Current accumulated interrupt count: %d\n", interruptCount);
   }
 
   // Remainder of routine loop code here
-
+  // Serial.println("In loop()");
+  // delay(1000);
   check_status();
 }
 
