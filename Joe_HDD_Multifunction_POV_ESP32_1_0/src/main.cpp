@@ -2,12 +2,22 @@
 #include <WiFi.h>
 #include <myNetworkInformation.h>
 
-#define LED2 2
-#define RED_LED 32
-#define GREEN_LED 33
-#define BLUE_LED 25
-#define LED_ON LOW
-#define LED_OFF HIGH
+// define output pins
+#define LED2 2       // LED_BUILTIN
+#define RED_LED 32   // gpio 32; pin 7
+#define GREEN_LED 33 // gpio 33; pin 8
+#define BLUE_LED 25  // gpio 25; pin 9
+
+// define input pins
+#define photoInterruptPin 27 // photoTrigger; gpio 27; pin 11
+#define buttonInterruptPin 14 // function pushbutton; gpio 14; pin 12
+#define functionBit0 0        // bit 0 (lsb) of function selected; gpio 0; pin 25
+#define functionBit1 4        // bit 1 of function selected; gpio 4; pin 26
+#define functionBit2 16       // bit 2 of function selected; gpio 16; pin 27
+#define functionBit3 17       // bit 3 (msb) of function selected; gpio 17; pin 28
+
+#define LED_ON LOW   // my LEDs are common collector (active LOW)
+#define LED_OFF HIGH // my LEDs are common collector (active LOW)
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
@@ -24,24 +34,39 @@ int hours = 0;   // 0-23
 int minutes = 0; // 0-59
 int seconds = 0; // 0-59
 
+int function = 0; // function read from 4 bits, selected by pushbutton
+
 // ------------------ define and initialize interrupt line -----------
-struct InterruptLine
+struct photoInterruptLine
 {
   const uint8_t PIN; // gpio pin number
   uint32_t numHits;  // number of times fired
   bool TRIGGERED;    // boolean logical; is triggered now
 };
+photoInterruptLine photoTrigger = {photoInterruptPin, 0, false};
 
-InterruptLine photoTrigger = {27, 0, false};
+struct buttonInterruptLine
+{
+  const uint8_t PIN; // gpio pin number
+  uint32_t numHits;  // number of times fired
+  bool PRESSED;    // boolean logical; is triggered now
+};
+buttonInterruptLine buttonPress = {buttonInterruptPin, 0, false};
 
 // --------------- function declarations ---------------
 void setMyTime();
 void printLocalTime();
 
+// --------------- interrupt function declarations ---------------
 void IRAM_ATTR trigger()
 {
   photoTrigger.numHits++;
   photoTrigger.TRIGGERED = true;
+}
+void IRAM_ATTR press()
+{
+  buttonPress.numHits++;
+  buttonPress.PRESSED = true;
 }
 
 //--------------- setup() --------------------------------
@@ -57,8 +82,17 @@ void setup()
   digitalWrite(GREEN_LED, LED_OFF);
   digitalWrite(BLUE_LED, LED_OFF);
 
+  // configure photo trigger interrupt pin
   pinMode(photoTrigger.PIN, INPUT_PULLUP);
   attachInterrupt(photoTrigger.PIN, trigger, FALLING);
+
+  // configure function pushbutton interrupt and select pin
+  pinMode(buttonPress.PIN, INPUT_PULLUP);
+  attachInterrupt(buttonPress.PIN, press, FALLING);
+  pinMode(functionBit0, INPUT_PULLUP);
+  pinMode(functionBit1, INPUT_PULLUP);
+  pinMode(functionBit2, INPUT_PULLUP);
+  pinMode(functionBit3, INPUT_PULLUP);
 
   // Configure and start the WiFi station
   Serial.printf("Connecting to %s ", ssid);
@@ -88,10 +122,9 @@ void setup()
 //--------------- loop() --------------------------------
 void loop()
 {
+  // first handle flagged interrupts, then do other stuff
   if (photoTrigger.TRIGGERED)
   {
-    Serial.printf("Interrupt has fired %u times\n", photoTrigger.numHits);
-    photoTrigger.TRIGGERED = false;
     digitalWrite(LED2, HIGH);
     digitalWrite(RED_LED, LED_ON);
     digitalWrite(GREEN_LED, LED_ON);
@@ -101,6 +134,18 @@ void loop()
     digitalWrite(RED_LED, LED_OFF);
     digitalWrite(GREEN_LED, LED_OFF);
     digitalWrite(BLUE_LED, LED_OFF);
+    Serial.printf("photoInterrupt has fired %u times\n", photoTrigger.numHits);
+    photoTrigger.TRIGGERED = false;
+  }
+  if (buttonPress.PRESSED){
+    // read input pins, to set function
+    function = digitalRead(functionBit0);
+    function |= (digitalRead(functionBit1) << 1);
+    function |= (digitalRead(functionBit2) << 2);
+    function |= (digitalRead(functionBit3) << 3);
+    function = (15 - function);
+    Serial.printf("Selected: [%d]; fired %u times\n", function, buttonPress.numHits);
+    buttonPress.PRESSED = false;
   }
 }
 
