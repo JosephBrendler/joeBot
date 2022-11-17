@@ -9,24 +9,46 @@
 #define LED_ON LOW
 #define LED_OFF HIGH
 
+const char *ssid = mySSID;
+const char *pass = myPASSWORD;
+
+// time variables used in setting clock and timestamping
+time_t timeNow;
+struct tm timeinfo;
+const long gmtOffset_sec = (-5 * 3600);
+const int daylightOffset_sec = 3600;
+const char *ntpServer1 = "time.nist.gov";
+const char *ntpServer2 = "pool.ntp.org";
+
+int hours = 0;   // 0-23
+int minutes = 0; // 0-59
+int seconds = 0; // 0-59
+
+// ------------------ define and initialize interrupt line -----------
 struct InterruptLine
 {
-  const uint8_t PIN;
-  uint32_t numHits;
-  bool TRIGGERED;
+  const uint8_t PIN; // gpio pin number
+  uint32_t numHits;  // number of times fired
+  bool TRIGGERED;    // boolean logical; is triggered now
 };
 
 InterruptLine photoTrigger = {27, 0, false};
 
-void IRAM_ATTR isr()
+// --------------- function declarations ---------------
+void setMyTime();
+void printLocalTime();
+
+void IRAM_ATTR trigger()
 {
   photoTrigger.numHits++;
   photoTrigger.TRIGGERED = true;
 }
 
+//--------------- setup() --------------------------------
 void setup()
 {
   Serial.begin(115200);
+  Serial.println("Starting setup()...");
   pinMode(LED2, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   pinMode(GREEN_LED, OUTPUT);
@@ -36,10 +58,34 @@ void setup()
   digitalWrite(BLUE_LED, LED_OFF);
 
   pinMode(photoTrigger.PIN, INPUT_PULLUP);
-  attachInterrupt(photoTrigger.PIN, isr, FALLING);
+  attachInterrupt(photoTrigger.PIN, trigger, FALLING);
+
+  // Configure and start the WiFi station
+  Serial.printf("Connecting to %s ", ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, pass);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.printf("\n   CONNECTED to WiFi [%s] on IP: ", ssid);
+  Serial.println(WiFi.localIP());
+
+  // print unititialized time, just to be able to compare
+  printLocalTime();
+  setMyTime();
+  printLocalTime();
+
+  // disconnect WiFi as it's no longer needed
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("WiFi disconnected");
+
   Serial.println("setup complete");
 }
 
+//--------------- loop() --------------------------------
 void loop()
 {
   if (photoTrigger.TRIGGERED)
@@ -56,4 +102,35 @@ void loop()
     digitalWrite(GREEN_LED, LED_OFF);
     digitalWrite(BLUE_LED, LED_OFF);
   }
+}
+
+//--------------- setMyTime() --------------------------------
+void setMyTime()
+{
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
+  // while (time(nullptr) < 8 * 3600)
+  while (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    delay(5000);
+  }
+}
+
+//--------------- printLocalTime() --------------------------------
+void printLocalTime()
+{
+  time(&timeNow);
+  // Serial.printf("timeNow.: Coordinated Universal Time is %s", asctime(gmtime(&timeNow)));
+  gmtime_r(&timeNow, &timeinfo);
+  // Serial.print("timeinfo: Coordinated Universal Time is ");
+  //   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  // Serial.println(&timeinfo, "%a %b %d %H:%M:%S %Y");
+  Serial.print("timeinfo: ............ my Local Time is ");
+  localtime_r(&timeNow, &timeinfo);
+  Serial.println(&timeinfo, "%a %b %d %H:%M:%S %Y");
+  // hours = timeinfo.tm_hour;
+  hours = (timeinfo.tm_hour % 12);
+  minutes = timeinfo.tm_min;
+  seconds = timeinfo.tm_sec;
+  Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
 }
