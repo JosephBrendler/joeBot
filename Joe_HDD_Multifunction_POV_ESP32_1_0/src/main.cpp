@@ -11,7 +11,7 @@
 #include "OTA_Joe2.h"
 #include <stdio.h>
 
-#define timeInterval 3 // used to define to keep output (e.g. relay) "on" after trigger
+#define timeInterval 5 // used to define to keep output (e.g. relay) "on" after trigger
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
@@ -22,11 +22,18 @@ const char *logPath = myLogFormPATH;
 const char *statusPath = myStatusFormPATH;
 const char *protocol = myPROTOCOL;
 
-const int OTA_LED = LED_BUILTIN;
+// identify digital inputs
+const gpio_num_t photoTrigger = GPIO_NUM_27; // gpio 27; pin 11
+
+// identify digital outputs
+const gpio_num_t RED_LED = GPIO_NUM_34;   // gpio 34; pin 5
+const gpio_num_t GREEN_LED = GPIO_NUM_35; // gpio 35; pin 6
+const gpio_num_t BLUE_LED = GPIO_NUM_32;  // gpio 32; pin 7
+const gpio_num_t OTA_LED = GPIO_NUM_2;    // LED_BUILTIN
+
 const int OTA_LED_ON = HIGH; // active high for ESP32; ESP12 8266 is active low)
 const int OTA_LED_OFF = LOW;
-
-const int photoTrigger = 27;
+const long clockSlotWidth = 100; // microseconds
 
 // time variables used in setting clock and timestamping
 time_t timeNow = time(nullptr);
@@ -65,11 +72,15 @@ void separator(String msg);
 void check_status();
 void fetchDataWithKnownKey();
 void uploadDataWithKnownKey(const char *uploadURL, const char *fieldName, char *myDATA);
-void blink(int LED);
+void blink(gpio_num_t LED, int onMicros);
 char *build_url(const char *proto, const char *host, const int port, const char *logPath);
 
 const char *myLogURL = build_url(protocol, SSL_host, SSL_port, logPath);
 const char *myStatusURL = build_url(protocol, SSL_host, SSL_port, statusPath);
+
+//--- ran into trouble using some gpio pins - configure here
+#define OUTPUT_BIT_MASK ((1ULL << RED_LED) | (1ULL << GREEN_LED) | (1ULL << BLUE_LED) | (1ULL < OTA_LED))
+#define INPUT_BIT_MASK (1ULL << photoTrigger)
 
 //-------------------- Define interrupt functions up front -----------------------------------------------
 // Checks if motion was detected, sets trigger_led HIGH and starts a timer
@@ -78,24 +89,52 @@ void IRAM_ATTR trigger()
   triggered = true;
 }
 
+/*----------------------------------------------------------------------------------------------------
+ * setup()
+ *
+ *---------------------------------------------------------------------------------------------------*/
 void setup()
 {
+  //--- ran into trouble using some gpio pins - configure here
+  gpio_config_t input_config;
+  // config inputs
+  input_config.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_NEGEDGE; // enable interrupt, falling edge
+  input_config.mode = GPIO_MODE_INPUT;                             // input for photo trigger
+  input_config.pin_bit_mask = INPUT_BIT_MASK;                      // (above) enables rgb led pins
+  input_config.pull_down_en = GPIO_PULLDOWN_DISABLE;               // disable pulldown
+  input_config.pull_up_en = GPIO_PULLUP_ENABLE;                    // enable pullup
+  gpio_config(&input_config);
+  gpio_config_t output_config;
+  // config outputs
+  output_config.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE; // disable interrupts
+  output_config.mode = GPIO_MODE_OUTPUT;
+  output_config.pin_bit_mask = OUTPUT_BIT_MASK; // (above) enables rgb led pins
+  output_config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  output_config.pull_up_en = GPIO_PULLUP_DISABLE;
+  gpio_config(&output_config);
+
   Serial.begin(115200);
   Serial.println("\n");
 
   // to do - disable interrupts
 
   // PIR Motion Sensor mode INPUT_PULLUP
-  pinMode(photoTrigger, INPUT_PULLUP);
+  //    pinMode(photoTrigger, INPUT_PULLUP);
   // Set motionSensor pin as interrupt, assign interrupt function and set RISING mode
   attachInterrupt(digitalPinToInterrupt(photoTrigger), trigger, FALLING);
 
   // Set LEDs to LOW
-  pinMode(OTA_LED, OUTPUT);
-  digitalWrite(OTA_LED, LOW);
+  //    pinMode(OTA_LED, OUTPUT);
+  gpio_set_level(OTA_LED, LOW);
+  //    pinMode(RED_LED, OUTPUT);
+  gpio_set_level(RED_LED, HIGH);
+  //    pinMode(GREEN_LED, OUTPUT);
+  gpio_set_level(GREEN_LED, LOW);
+  //    pinMode(BLUE_LED, OUTPUT);
+  gpio_set_level(BLUE_LED, LOW);
 
   // connect to wifi and set up over the air re-programming
-  blink(OTA_LED);
+  blink(OTA_LED, 100000);
   setupOTA(esp_host, ssid, pass); // use unique name each time
   check_status();
 
@@ -123,7 +162,7 @@ void setup()
   Serial.printf("about to call uploadData with data: %s", is_data_chars);
   uploadDataWithKnownKey(myStatusURL, "status", is_data_chars);
 
-  blink(OTA_LED);
+  blink(OTA_LED, 10000);
   check_status();
 
   Serial.println("Done setup...");
@@ -144,15 +183,17 @@ void loop()
     startTimer = true;
     triggered = false;
     interruptCount++;
-    Serial.printf("Interrupt# [%d] just received\n", interruptCount);
+    // Serial.printf("Interrupt# [%d] just received\n", interruptCount);
+    blink(RED_LED, clockSlotWidth);
   }
-  // Current time
-  now = millis();
+
   // notify and stop the timer when appropriate (nothing happens until then)
-  if (startTimer && (now - lastTrigger > (timeInterval * 1000)))
+  if (startTimer && ((millis() - lastTrigger) > (timeInterval * 1000)))
   {
     startTimer = false;
-    Serial.printf("Current accumulated interrupt count: %d\n", interruptCount);
+    //  Serial.printf("millis(): %d\nlastTrigger: %d\ntimeInterval*1000: %d\n", millis(), lastTrigger, (timeInterval * 1000));
+    //  Serial.printf("Current accumulated interrupt count: %d\n", interruptCount);
+    // Serial.printf("#: %d\n", interruptCount);
   }
 
   // Remainder of routine loop code here
@@ -167,11 +208,11 @@ void check_status()
 {
   if (WiFi.status() == WL_CONNECTED)
   {
-    digitalWrite(OTA_LED, OTA_LED_ON);
+    gpio_set_level(OTA_LED, OTA_LED_ON);
   }
   else
   {
-    digitalWrite(OTA_LED, OTA_LED_OFF);
+    gpio_set_level(OTA_LED, OTA_LED_OFF);
   }
   delay(100);
 }
@@ -185,14 +226,13 @@ void separator(String msg)
 
 /*----------------------------------------------------------------------------------------------------*/
 // Blink the built-in LED
-void blink(int LED)
+void blink(gpio_num_t LED, int onMicros)
 {
   for (int i = 0; i < 3; i++)
   {
-    digitalWrite(LED, OTA_LED_ON);
-    delay(100);
-    digitalWrite(LED, OTA_LED_OFF);
-    delay(100);
+    gpio_set_level(LED, OTA_LED_ON);
+    delayMicroseconds(onMicros);
+    gpio_set_level(LED, OTA_LED_OFF);
   }
 }
 
