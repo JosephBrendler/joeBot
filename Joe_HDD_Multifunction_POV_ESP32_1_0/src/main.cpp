@@ -3,8 +3,9 @@
 #include <myNetworkInformation.h>
 
 // define output pins
-#define LED2 2       // LED_BUILTIN
-#define RED_LED 5    // gpio 5; pin 29
+#define LED2 2 // LED_BUILTIN
+// define RGB LEDs on consecutive sequential bits of GPIO register - to write at once
+#define RED_LED 17   // gpio 17; pin 28
 #define GREEN_LED 18 // gpio 18; pin 30
 #define BLUE_LED 19  // gpio 19; pin 31
 
@@ -12,13 +13,15 @@
 #define photoInterruptPin 27  // photoTrigger; gpio 27; pin 11
 #define buttonInterruptPin 33 // function pushbutton; gpio 33; pin 8
 
+// define function bits on consecutive sequential bits of GPIO register - to read at once
 #define functionBit0 12 // bit 0 (lsb) of function selected; gpio 12; pin 13
 #define functionBit1 13 // bit 1 of function selected; gpio 13; pin 15
 #define functionBit2 14 // bit 2 of function selected; gpio 14; pin 12
 #define functionBit3 15 // bit 3 (msb) of function7 selected; gpio 15; pin 23
 
-#define LED_ON LOW   // my LEDs are common collector (active LOW)
-#define LED_OFF HIGH // my LEDs are common collector (active LOW)
+// used to set LED2 (active HIGH on ESP32, LOW on 8266)
+#define LED_ON HIGH
+#define LED_OFF LOW
 
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
@@ -35,9 +38,23 @@ int hours = 0;   // 0-23
 int minutes = 0; // 0-59
 int seconds = 0; // 0-59
 
+// ToDO - calibration (for now 8.4ms period = 60 x 140us slots)
+int slotWidth = 140;
+
 int function = 0; // function read from 4 bits, selected by pushbutton
 
-// ------------------ define and initialize interrupt line -----------
+// initialize timer and associated boolean flag
+hw_timer_t *slotTimer = NULL;
+volatile bool ENDSLOT = false;
+hw_timer_t *secondTimer = NULL;
+volatile bool MARKSECOND = false;
+
+// initialize timer mux(s) to take care of the synchronization between
+// the main loop and the ISR, when modifying a shared variable (volatile bools)
+portMUX_TYPE slotTimerMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE secondTimerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// -------- define and initialize interrupt line structs -----------
 struct photoInterruptLine
 {
     const uint8_t PIN; // gpio pin number
@@ -70,6 +87,18 @@ void IRAM_ATTR press()
     buttonPress.PRESSED = true;
 }
 
+void IRAM_ATTR onSecondTimer()
+{
+    portENTER_CRITICAL(&secondTimerMux);
+    MARKSECOND = true;
+    portEXIT_CRITICAL(&secondTimerMux);
+}
+void IRAM_ATTR onSlotTimer()
+{
+    portENTER_CRITICAL(&slotTimerMux);
+    ENDSLOT = true;
+    portEXIT_CRITICAL(&slotTimerMux);
+}
 //--------------- setup() --------------------------------
 void setup()
 {
@@ -87,8 +116,8 @@ void setup()
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pin_bit_mask = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
     gpio_config(&io_conf);
-    // turn LEDs off (set output pins -- my LEDs are active LOW)
-    GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
 
     // configure photo trigger interrupt pin
     pinMode(photoTrigger.PIN, INPUT_PULLUP);
@@ -105,6 +134,16 @@ void setup()
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pin_bit_mask = (1ULL << functionBit0) | (1ULL << functionBit1) | (1ULL << functionBit2) | (1ULL << functionBit3);
     gpio_config(&io_conf);
+
+    // configure timers for interrupt (use prescaler 80 to clock at 1mhz, 1us/tick)
+    secondTimer = timerBegin(0, 80, true);
+    timerAttachInterrupt(secondTimer, &onSecondTimer, true);
+    timerAlarmWrite(secondTimer, slotWidth, false); // period will be reset by local time (seconds)
+    timerAlarmDisable(secondTimer);                 // enabled by photoTrigger; disabled by self
+    slotTimer = timerBegin(3, 80, true);
+    timerAttachInterrupt(slotTimer, &onSlotTimer, true);
+    timerAlarmWrite(slotTimer, slotWidth, false);
+    timerAlarmDisable(slotTimer); // enabled by clockHand timer; disabled by self
 
     // Configure and start the WiFi station
     Serial.printf("Connecting to %s ", ssid);
@@ -137,9 +176,11 @@ void loop()
     // first handle flagged interrupts, then do other stuff
     if (photoTrigger.TRIGGERED)
     {
-        GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
-        delayMicroseconds(200);
-        GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+        // new spin-cycle; start second hand timer
+        portENTER_CRITICAL(&secondTimerMux);
+        timerAlarmWrite(secondTimer, (seconds * slotWidth), false);
+        timerAlarmEnable(secondTimer);
+        portEXIT_CRITICAL(&secondTimerMux);
 
         Serial.printf("photoInterrupt has fired %u times\n", photoTrigger.numHits);
         photoTrigger.TRIGGERED = false;
@@ -151,6 +192,33 @@ void loop()
         Serial.printf("Selected: [%d], Pressed %d times\n", state, buttonPress.numHits);
         buttonPress.PRESSED = false;
     }
+    if (ENDSLOT)
+    {
+        // turn off leds; stop slot timer
+        // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+        GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+        portENTER_CRITICAL(&slotTimerMux);
+        timerAlarmDisable(slotTimer);
+        ENDSLOT = false;
+        Serial.println("ENDSLOT");
+        portEXIT_CRITICAL(&slotTimerMux);
+    }
+    if (MARKSECOND)
+    {
+        // turn on LEDs (flag MARKSECOND to start slot timer, stop second timer)
+        // turn LEDs on (set output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+        GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+        portENTER_CRITICAL(&slotTimerMux);
+        timerAlarmWrite(slotTimer, (slotWidth), false);
+        timerAlarmEnable(slotTimer);
+        portENTER_CRITICAL(&secondTimerMux);
+        timerAlarmDisable(secondTimer);
+        MARKSECOND = false;
+        Serial.println("MARKSECOND");
+        portEXIT_CRITICAL(&secondTimerMux);
+        portEXIT_CRITICAL(&slotTimerMux);
+    }
+    // now do other stuff
 }
 
 //--------------- setMyTime() --------------------------------
@@ -182,4 +250,14 @@ void printLocalTime()
     minutes = timeinfo.tm_min;
     seconds = timeinfo.tm_sec;
     Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
+}
+
+//--------------- printLocalTime() --------------------------------
+void setLocalTime()
+{
+    localtime_r(&timeNow, &timeinfo);
+    hours = (timeinfo.tm_hour % 12);
+    minutes = timeinfo.tm_min;
+    seconds = timeinfo.tm_sec;
+    // Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
 }

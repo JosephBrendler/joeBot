@@ -2,7 +2,7 @@
 
 // define output pins
 #define LED2 2       // LED_BUILTIN
-#define RED_LED 5    // gpio 5; pin 29
+#define RED_LED 17    // gpio 17; pin 28
 #define GREEN_LED 18 // gpio 18; pin 30
 #define BLUE_LED 19  // gpio 19; pin 31
 
@@ -13,8 +13,9 @@
 #define functionBit2 14 // bit 2 of function selected; gpio 14; pin 12
 #define functionBit3 15 // bit 3 (msb) of function7 selected; gpio 15; pin 23
 
-#define LED_ON LOW   // my LEDs are common collector (active LOW)
-#define LED_OFF HIGH // my LEDs are common collector (active LOW)
+// used to set LED2 (active HIGH on ESP32, LOW on 8266)
+#define LED_ON HIGH
+#define LED_OFF LOW
 
 int function = 0; // selected function (4 bits)
 struct buttonInterruptLine
