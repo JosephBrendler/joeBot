@@ -137,29 +137,18 @@ void loop()
     // first handle flagged interrupts, then do other stuff
     if (photoTrigger.TRIGGERED)
     {
-        // digitalWrite(LED2, HIGH);
-        // digitalWrite(RED_LED, LED_ON);
-        // digitalWrite(GREEN_LED, LED_ON);
-        // digitalWrite(BLUE_LED, LED_ON);
         GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
         delayMicroseconds(200);
         GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
-        // digitalWrite(LED2, LOW);
-        // digitalWrite(RED_LED, LED_OFF);
-        // digitalWrite(GREEN_LED, LED_OFF);
-        // digitalWrite(BLUE_LED, LED_OFF);
+
         Serial.printf("photoInterrupt has fired %u times\n", photoTrigger.numHits);
         photoTrigger.TRIGGERED = false;
     }
     if (buttonPress.PRESSED)
     {
-        // read input pins, to set function
-        function = digitalRead(functionBit0);
-        function |= (digitalRead(functionBit1) << 1);
-        function |= (digitalRead(functionBit2) << 2);
-        function |= (digitalRead(functionBit3) << 3);
-        function = (15 - function);
-        Serial.printf("Selected: [%d]; fired %u times\n", function, buttonPress.numHits);
+        // read input pins, to set function - 4 x bits are active LOW so substract from 0xff
+        uint8_t state = 0xff - (GPIO_REG_READ(GPIO_IN_REG) >> functionBit0) & 0b1111;
+        Serial.printf("Selected: [%d], Pressed %d times\n", state, buttonPress.numHits);
         buttonPress.PRESSED = false;
     }
 }
