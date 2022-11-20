@@ -1,3 +1,20 @@
+/* 3-phase motor driver
+   Joe Brendler 20 Nov 2022
+   Initially based on tuturial by Bart Venneker youtube.com/watch?v=CMz2DYpos8w
+   Modifications -
+   - added ESP32 option - different pins
+   - moved steplength adjustment to function (simplifing loop)
+   - started slower, lengthened transitions from gear 1-2 and 3-4
+
+   Basic idea - start with long 3-phase pulse signal, and gradually accelerate by reducing the pulse-lenth (stepLength)
+   ToDo -
+     + shift to direct register manipulation of consecutive gpios
+     + shift to hardware timer interrupts instead of delays in loop function
+       -- timer0 = stage duration (stepLentgh)
+       -- isr() = stage++; STEP=true; (flag to switchstep(stage) and set STEP=false)
+     + shift to
+     add PID control
+   */
 #include <Arduino.h>
 
 //#define ESP32 //otherwise 8266
@@ -12,20 +29,42 @@
 #define phase3 D7 // gpio 13; pin 6
 #endif
 
-uint32_t stepLength = 40000;   // ms
-uint16_t minStepLength = 1400; // ms
-int steps = 5;
+// define baseline starting and minimum driver signal pulse length
+uint32_t stepLength = 50000;   // us (Bart: 40000) (this is the duration of delay in each stage of the 3-phase signal)
+uint16_t minStepLength = 4000; // us (Bart: 1400) (driving 2 x disk platters, I can't go that fast)
+
+// define how much each cycle will reduce the driver signal pulse duration
+const int firstGearSteps = 50;   // us (Bart: 5)
+const int secondGearSteps = 300; // us (Bart: 300)
+const int thirdGearSteps = 50;   // us (Bart: 50)
+const int fourthGearSteps = 2;   // us (Bart: 2)
+
+// define the threshold for when to shift gears (to steps above)
+const int gear_12_threshold = 39950; // us
+const int gear_23_threshold = 20000; // us
+const int gear_34_threshold = 3000;  // us
+
+const int delay_threshold = 16380; // us (above this use delay(ms), below use delayMicroseconds(us))
 
 const int LED = LED_BUILTIN;
 
+int steps = firstGearSteps;
+
+bool secondgear = false;
+bool thirdgear = false;
+bool fourthgear = false;
+
 //--------- function declarations ------------
-void myDelay(unsigned long p);
+void myDelay(unsigned long stepMicroseconds);
 void switchStep(int stage);
 void adjustStepLength();
 
 //---------- setup() -------------------------
 void setup()
 {
+  Serial.begin(115200);
+  Serial.println("Starting setup");
+
   pinMode(LED, OUTPUT);
   pinMode(phase1, OUTPUT);
   pinMode(phase2, OUTPUT);
@@ -36,6 +75,8 @@ void setup()
   digitalWrite(phase3, HIGH);
 
   digitalWrite(LED, LOW);
+  Serial.println("Done setup");
+  Serial.println("Starting in first gear");
 }
 
 //--------------- loop() --------------------------
@@ -76,21 +117,22 @@ void switchStep(int stage)
 }
 
 //--------------- myDelay() --------------------------
-void myDelay(unsigned long p)
+void myDelay(unsigned long stepMicroseconds)
 {
-  if (p > 16380)
+  if (stepMicroseconds > delay_threshold)
   {
-    delay(p / 1000);
+    delay(stepMicroseconds / 1000);
   }
   else
   {
-    delayMicroseconds(p);
+    delayMicroseconds(stepMicroseconds);
   }
 }
 
 //--------------- adjustStepLength() --------------------------
 void adjustStepLength()
 {
+  // adjust stepLength by stepSize
   if (stepLength > minStepLength)
   {
     stepLength = stepLength - steps;
@@ -100,24 +142,36 @@ void adjustStepLength()
     stepLength = minStepLength;
   }
 
-  if (stepLength < 39950)
+  if (stepLength < gear_12_threshold)
   {
-    // second gear
-    digitalWrite(LED, HIGH);
-    steps = 300;
+    if (!secondgear)
+    {
+      secondgear = true;
+      Serial.println("second gear");
+      digitalWrite(LED, HIGH);
+      steps = secondGearSteps;
+    }
   }
 
-  if (stepLength < 20000)
+  if (stepLength < gear_23_threshold)
   {
-    // third gear
-    digitalWrite(LED, LOW);
-    steps = 50;
+    if (!thirdgear)
+    {
+      thirdgear = true;
+      Serial.println("third gear");
+      digitalWrite(LED, LOW);
+      steps = thirdGearSteps;
+    }
   }
 
-  if (stepLength < 3000)
+  if (stepLength < gear_34_threshold)
   {
-    // fourth gear
-    digitalWrite(LED, HIGH);
-    steps = 2;
+    if (!fourthgear)
+    {
+      fourthgear = true;
+      Serial.println("fourth gear");
+      digitalWrite(LED, HIGH);
+      steps = fourthGearSteps;
+    }
   }
 }
