@@ -1,13 +1,16 @@
 #include <Arduino.h>
 
-/*
+//#define ESP32 //otherwise 8266
+
+#ifdef ESP32
 #define phase1 4  // gpio 4; pin 26
 #define phase2 5  // gpio 5; pin 29
 #define phase3 16 // gpio 16; pin 27
-*/
-const int phase1 = D5;
-const int phase2 = D6;
-const int phase3 = D7;
+#else
+#define phase1 D5 // gpio 14; pin 4
+#define phase2 D6 // gpio 12; pin 5
+#define phase3 D7 // gpio 13; pin 6
+#endif
 
 uint32_t stepLength = 40000;   // ms
 uint16_t minStepLength = 1400; // ms
