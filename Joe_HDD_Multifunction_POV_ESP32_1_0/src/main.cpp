@@ -26,6 +26,18 @@
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
 
+// define outputs for 3-phase motor driver
+// ToDo - convert to a class library
+#define phase1 4 // gpio 4; pin 26
+#define phase2 5 // gpio 5; pin 29
+#define phase3 16 // gpio 16; pin 27
+
+// initialize variables for 3-phase motor driver
+// ToDo - convert to a class library
+uint32_t stepLength = 40000;   // ms
+uint16_t minStepLength = 1400; // ms
+int steps = 5;
+
 // time variables used in setting clock and timestamping
 time_t timeNow;
 struct tm timeinfo;
@@ -95,6 +107,11 @@ int i = 0, j = 0; // integer loop counters
 void setMyTime();
 void printLocalTime();
 void blink();
+//--------- motor driver function declarations ------------
+// ToDo - convert to a class library
+void myDelay(unsigned long p);
+void switchStep(int stage);
+void adjustSteplength();
 
 // --------------- interrupt function declarations ---------------
 void IRAM_ATTR trigger()
@@ -127,8 +144,20 @@ void IRAM_ATTR onSlotTimer()
 //--------------- setup() --------------------------------
 void setup()
 {
+    // motor driver setup
+    // ToDo - convert to a class library
+    pinMode(phase1, OUTPUT);
+    pinMode(phase2, OUTPUT);
+    pinMode(phase3, OUTPUT);
+    digitalWrite(phase1, HIGH);
+    digitalWrite(phase2, HIGH);
+    digitalWrite(phase3, HIGH);
+    // configure outputs
+    pinMode(LED2, OUTPUT);
+    digitalWrite(LED2, LED_OFF);
+
     // Give me 5 seconds to spin up the disk (note: can't use delay with interrupts off)
-    delay(5000);
+    delay(5000); // ToDo - loop will spin up motor now, so this has to go
 
     // no interrupts
     cli();
@@ -136,9 +165,6 @@ void setup()
     Serial.begin(115200);
     Serial.println("Starting setup()...");
 
-    // configure outputs
-    pinMode(LED2, OUTPUT);
-    digitalWrite(LED2, LED_OFF);
     // config 3 x RGB LED outputs
     gpio_config_t io_conf;
     io_conf.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE;
@@ -260,6 +286,13 @@ void loop()
         portEXIT_CRITICAL(&slotTimerMux);
     }
     // now do other stuff
+    // interrupt handling above should be very fast and "by exception"
+    // motor driver loop code here
+    // ToDo - replace with class library motorHandler()
+    switchStep(1);
+    switchStep(2);
+    switchStep(3);
+    adjustSteplength();
 }
 
 //--------------- setMyTime() --------------------------------
@@ -328,5 +361,92 @@ void blink()
         delay(100);
         GPIO.out_w1tc = (1 << BLUE_LED);
         delay(100);
+    }
+}
+
+/*------------------------------------------------------------------------------
+   switchStep()
+   used by motor driver
+   ToDo - move to class library
+  ------------------------------------------------------------------------------*/
+void switchStep(int stage)
+{
+    switch (stage)
+    {
+    case 1:
+        digitalWrite(phase1, HIGH);
+        digitalWrite(phase2, LOW);
+        digitalWrite(phase3, LOW);
+        myDelay(stepLength);
+        break;
+
+    case 2:
+        digitalWrite(phase1, LOW);
+        digitalWrite(phase2, HIGH);
+        digitalWrite(phase3, LOW);
+        myDelay(stepLength);
+        break;
+
+    default:
+        digitalWrite(phase1, LOW);
+        digitalWrite(phase2, LOW);
+        digitalWrite(phase3, HIGH);
+        myDelay(stepLength);
+        break;
+    }
+}
+
+/*------------------------------------------------------------------------------
+   myDelay()
+   used by motor driver
+   ToDo - move to class library
+  ------------------------------------------------------------------------------*/
+void myDelay(unsigned long p)
+{
+    if (p > 16380)
+    {
+        delay(p / 1000);
+    }
+    else
+    {
+        delayMicroseconds(p);
+    }
+}
+
+/*------------------------------------------------------------------------------
+   myDelay()
+   used by motor driver
+   ToDo - move to class library
+  ------------------------------------------------------------------------------*/
+void adjustSteplength()
+{
+    if (stepLength > minStepLength)
+    {
+        stepLength = stepLength - steps;
+    }
+    else
+    { // set minimum pulse length
+        stepLength = minStepLength;
+    }
+
+    if (stepLength < 39950)
+    {
+        // second gear
+        digitalWrite(LED2, HIGH);
+        steps = 300;
+    }
+
+    if (stepLength < 20000)
+    {
+        // third gear
+        digitalWrite(LED2, LOW);
+        steps = 50;
+    }
+
+    if (stepLength < 3000)
+    {
+        // fourth gear
+        digitalWrite(LED2, HIGH);
+        steps = 2;
     }
 }
