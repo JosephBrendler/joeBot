@@ -26,18 +26,6 @@
 const char *ssid = mySSID;
 const char *pass = myPASSWORD;
 
-// define outputs for 3-phase motor driver
-// ToDo - convert to a class library
-#define phase1 4 // gpio 4; pin 26
-#define phase2 5 // gpio 5; pin 29
-#define phase3 16 // gpio 16; pin 27
-
-// initialize variables for 3-phase motor driver
-// ToDo - convert to a class library
-uint32_t stepLength = 40000;   // ms
-uint16_t minStepLength = 1400; // ms
-int steps = 5;
-
 // time variables used in setting clock and timestamping
 time_t timeNow;
 struct tm timeinfo;
@@ -46,6 +34,7 @@ const int daylightOffset_sec = 3600;
 const char *ntpServer1 = "time.nist.gov";
 const char *ntpServer2 = "pool.ntp.org";
 
+/*
 const byte BLACK = 0b00000000;   // RGB 000 mapped to Port B LED pins
 const byte RED = 0b00000010;     // RGB 001 mapped to Port B LED pins
 const byte GREEN = 0b00000100;   // RGB 010 mapped to Port B LED pins
@@ -54,19 +43,31 @@ const byte BLUE = 0b00001000;    // RGB 100 mapped to Port B LED pins
 const byte MAGENTA = 0b00001010; // RGB 101 mapped to Port B LED pins
 const byte CYAN = 0b00001100;    // RGB 110 mapped to Port B LED pins
 const byte WHITE = 0b00001110;   // RGB 111 mapped to Port B LED pins
+*/
+
+// define 3-bit RGB color values
+const byte BLACK = 0b000;
+const byte RED = 0b001;
+const byte GREEN = 0b010;
+const byte YELLOW = 0b010;
+const byte BLUE = 0b100;
+const byte MAGENTA = 0b101;
+const byte CYAN = 0b110;
+const byte WHITE = 0b111;
 
 const String RGBstr[8] = {"Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White"};
 
 byte ClockFace[60];    // 60 valid positions, each with 3-bit RGB value to be displayed
 int clockPosition = 0; // position (0-59) on the clockface; index for ClockFace[]
 
-int hours = 0;         // 0-23
-int minutes = 0;       // 0-59
-int seconds = 0;       // 0-59
-long milliseconds = 0; //
-int newseconds = 0;    // integer number of seconds
-int newminutes = 0;    // integer number of minutes
-int newhours = 0;      // integer number of hours
+int hours = 0;            // 0-23
+int minutes = 0;          // 0-59
+int seconds = 0;          // 0-59
+long milliseconds = 0;    //
+int newseconds = 0;       // integer number of seconds
+int newminutes = 0;       // integer number of minutes
+int newhours = 0;         // integer number of hours
+bool INITIALIZED = false; // clockface initialized?
 
 // ToDO - calibration (for now 8.4ms period = 60 x 140us slots)
 int slotWidth = 140;
@@ -107,11 +108,6 @@ int i = 0, j = 0; // integer loop counters
 void setMyTime();
 void printLocalTime();
 void blink();
-//--------- motor driver function declarations ------------
-// ToDo - convert to a class library
-void myDelay(unsigned long p);
-void switchStep(int stage);
-void adjustSteplength();
 
 // --------------- interrupt function declarations ---------------
 void IRAM_ATTR trigger()
@@ -144,14 +140,7 @@ void IRAM_ATTR onSlotTimer()
 //--------------- setup() --------------------------------
 void setup()
 {
-    // motor driver setup
-    // ToDo - convert to a class library
-    pinMode(phase1, OUTPUT);
-    pinMode(phase2, OUTPUT);
-    pinMode(phase3, OUTPUT);
-    digitalWrite(phase1, HIGH);
-    digitalWrite(phase2, HIGH);
-    digitalWrite(phase3, HIGH);
+
     // configure outputs
     pinMode(LED2, OUTPUT);
     digitalWrite(LED2, LED_OFF);
@@ -159,13 +148,11 @@ void setup()
     // Give me 5 seconds to spin up the disk (note: can't use delay with interrupts off)
     delay(5000); // ToDo - loop will spin up motor now, so this has to go
 
-    // no interrupts
-    cli();
-
     Serial.begin(115200);
-    Serial.println("Starting setup()...");
+    Serial.println("Starting setup()... ");
 
-    // config 3 x RGB LED outputs
+    // Configure 3 x RGB LED outputs
+    Serial.print("configure 3 x RGB LED outputs... ");
     gpio_config_t io_conf;
     io_conf.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -173,26 +160,44 @@ void setup()
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pin_bit_mask = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
     gpio_config(&io_conf);
-    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    // Turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    Serial.print("==> Done\nTurning off LEDs... ");
     GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    Serial.println("==> Done");
 
-    // configure photo trigger interrupt pin
+    // Configure photo trigger interrupt pin
+    Serial.print("Configure photo trigger interrupt pin... ");
     pinMode(photoTrigger.PIN, INPUT_PULLUP);
+    Serial.println("==> Done");
+    Serial.print("Attach photo trigger interrupt... ");
     attachInterrupt(photoTrigger.PIN, trigger, FALLING);
+    Serial.println("==> Done");
 
-    // configure function pushbutton interrupt
+    // Configure function pushbutton interrupt pin
+    Serial.print("Configure function pushbutton interrupt pin... ");
     pinMode(buttonPress.PIN, INPUT_PULLUP);
+    Serial.println("==> Done");
+    Serial.print("Attach function pushbutton interrupt... ");
     attachInterrupt(buttonPress.PIN, set_loop_fn, FALLING);
+    Serial.println("==> Done");
 
-    // configure 4 x digital input pins used to select function
+    // no interrupts
+    // Serial.print("Disabling interrupts... ");
+    // cli();
+    // Serial.println("==> Done");
+
+    // Configure 4 x digital input pins used to select function
+    Serial.print("Configure 4 x digital input pins used to select function... ");
     io_conf.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pin_bit_mask = (1ULL << functionBit0) | (1ULL << functionBit1) | (1ULL << functionBit2) | (1ULL << functionBit3);
     gpio_config(&io_conf);
+    Serial.println("==> Done");
 
-    // configure timers for interrupt (use prescaler 80 to clock at 1mhz, 1us/tick)
+    // Configure timers for interrupt (use prescaler 80 to clock at 1mhz, 1us/tick)
+    Serial.print("Configure timers for interrupt (use prescaler 80 to clock at 1mhz, 1us/tick)... ");
     secondTimer = timerBegin(0, 80, true);
     timerAttachInterrupt(secondTimer, &onSecondTimer, true);
     timerAlarmWrite(secondTimer, slotWidth, false); // period will be reset by local time (seconds)
@@ -201,9 +206,10 @@ void setup()
     timerAttachInterrupt(slotTimer, &onSlotTimer, true);
     timerAlarmWrite(slotTimer, slotWidth, false);
     timerAlarmDisable(slotTimer); // enabled by clockHand timer; disabled by self
+    Serial.println("==> Done");
 
     // Configure and start the WiFi station
-    Serial.printf("Connecting to %s ", ssid);
+    Serial.printf("Starting WiFi; connecting to %s ", ssid);
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, pass);
     while (WiFi.status() != WL_CONNECTED)
@@ -211,30 +217,33 @@ void setup()
         delay(500);
         Serial.print(".");
     }
-    Serial.printf("\n   CONNECTED to WiFi [%s] on IP: ", ssid);
+    Serial.printf("\n==> Done. CONNECTED to WiFi [%s] on IP: ", ssid);
     Serial.println(WiFi.localIP());
+    Serial.println("Setting local time from NTP server... ");
 
     // print unititialized time, just to be able to compare
     printLocalTime();
     setMyTime();
     printLocalTime();
+    Serial.println("==> Done setting time");
 
     // disconnect WiFi as it's no longer needed
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    Serial.println("WiFi disconnected");
+    Serial.println("==> WiFi disconnected");
 
     // read function from pattern bits (call isr for artificial button press)
     set_loop_fn();
 
     // enable global interrupts
+    Serial.print("Done setup; now enabling interrupts globally... ");
     sei();
-
-    // demonstrate setup (blink uses delay, so it needs interrupts turned on
+    Serial.println("==> Done");
+    digitalWrite(LED2, LED_ON); // demonstrate setup (blink uses delay, so it needs interrupts turned on
     blink();
-    Serial.println("Done setup; now enabling interrupts");
 
-    Serial.println("setup complete");
+    Serial.println("==> Setup complete");
+    Serial.println("---------------[ Runtime Output Follows ]-------------------");
 }
 
 //--------------- loop() --------------------------------
@@ -249,7 +258,7 @@ void loop()
         timerAlarmEnable(secondTimer);
         portEXIT_CRITICAL(&secondTimerMux);
 
-        Serial.printf("photoInterrupt has fired %u times\n", photoTrigger.numHits);
+        // Serial.printf("photoInterrupt has fired %u times\n", photoTrigger.numHits);
         photoTrigger.TRIGGERED = false;
     }
     if (buttonPress.PRESSED)
@@ -267,7 +276,7 @@ void loop()
         portENTER_CRITICAL(&slotTimerMux);
         timerAlarmDisable(slotTimer);
         ENDSLOT = false;
-        Serial.println("ENDSLOT");
+        // Serial.println("ENDSLOT");
         portEXIT_CRITICAL(&slotTimerMux);
     }
     if (MARKSECOND)
@@ -281,18 +290,11 @@ void loop()
         portENTER_CRITICAL(&secondTimerMux);
         timerAlarmDisable(secondTimer);
         MARKSECOND = false;
-        Serial.println("MARKSECOND");
+        // Serial.println("MARKSECOND");
         portEXIT_CRITICAL(&secondTimerMux);
         portEXIT_CRITICAL(&slotTimerMux);
     }
     // now do other stuff
-    // interrupt handling above should be very fast and "by exception"
-    // motor driver loop code here
-    // ToDo - replace with class library motorHandler()
-    switchStep(1);
-    switchStep(2);
-    switchStep(3);
-    adjustSteplength();
 }
 
 //--------------- setMyTime() --------------------------------
@@ -365,88 +367,117 @@ void blink()
 }
 
 /*------------------------------------------------------------------------------
-   switchStep()
-   used by motor driver
-   ToDo - move to class library
+   calculateClockFace() -- set the 60 values of the data to be displayed on clock
   ------------------------------------------------------------------------------*/
-void switchStep(int stage)
+void calculateClockFace()
 {
-    switch (stage)
-    {
-    case 1:
-        digitalWrite(phase1, HIGH);
-        digitalWrite(phase2, LOW);
-        digitalWrite(phase3, LOW);
-        myDelay(stepLength);
-        break;
+    // ClockFace[i] is an array modelling the 60 positions of the clock face, with
+    // each element set to the RGB value of color that should be displayed in that position
+    // this function updates this model with a minimum of instructions
 
-    case 2:
-        digitalWrite(phase1, LOW);
-        digitalWrite(phase2, HIGH);
-        digitalWrite(phase3, LOW);
-        myDelay(stepLength);
-        break;
-
-    default:
-        digitalWrite(phase1, LOW);
-        digitalWrite(phase2, LOW);
-        digitalWrite(phase3, HIGH);
-        myDelay(stepLength);
-        break;
-    }
-}
-
-/*------------------------------------------------------------------------------
-   myDelay()
-   used by motor driver
-   ToDo - move to class library
-  ------------------------------------------------------------------------------*/
-void myDelay(unsigned long p)
-{
-    if (p > 16380)
+    if (!INITIALIZED)
     {
-        delay(p / 1000);
-    }
-    else
-    {
-        delayMicroseconds(p);
-    }
-}
+        // blank the clockface
+        for (i = 0; i < 60; i++)
+        {
+            ClockFace[i] = 0;
+        }
 
-/*------------------------------------------------------------------------------
-   myDelay()
-   used by motor driver
-   ToDo - move to class library
-  ------------------------------------------------------------------------------*/
-void adjustSteplength()
-{
-    if (stepLength > minStepLength)
-    {
-        stepLength = stepLength - steps;
-    }
-    else
-    { // set minimum pulse length
-        stepLength = minStepLength;
+        // mark the "graduations"
+        for (i = 0; i < 60; i += 5)
+        {
+            if (i % 15 == 0)
+            {
+                // quater - mark yellow
+                ClockFace[i] = YELLOW;
+            }
+            else
+            {
+                // 1/12th - mark white
+                ClockFace[i] = WHITE;
+            }
+        }
+
+        // raise flag
+        INITIALIZED = true;
     }
 
-    if (stepLength < 39950)
+    // Get new time; change only values that need to be changed
+    // Assign (if needed) in this order so each supercedes previous,
+    //   if more than one hand is in the same position on the clock
+    // Calculate/assign seconds every time b/c this function is called every second
+    newseconds = (int)(milliseconds / 1000.0) % 60;
+    ClockFace[seconds] = BLACK; // blank the old one
+    // if the old second hand was "covering" something else, rewrite that w supercession
+    if (seconds == minutes)
     {
-        // second gear
-        digitalWrite(LED2, HIGH);
-        steps = 300;
+        ClockFace[minutes] = BLUE;
+    }
+    else if (seconds == hours)
+    {
+        ClockFace[hours] = GREEN;
+    }
+    else if (seconds % 5 == 0)
+    {
+        if (seconds % 15 == 0)
+        {
+            ClockFace[seconds] = YELLOW;
+        }
+        else
+        {
+            ClockFace[seconds] = WHITE;
+        }
     }
 
-    if (stepLength < 20000)
+    // calculate/assign minutes only when seconds gets back to 0
+    if (newseconds == 0)
     {
-        // third gear
-        digitalWrite(LED2, LOW);
-        steps = 50;
+        newminutes = (int)(milliseconds / 60000.0) % 60;
+        ClockFace[minutes] = BLACK; // blank the old one
+        // if the minute hand was "covering" something else, rewrite that w supercession
+        if (minutes == hours)
+        {
+            ClockFace[hours] = GREEN;
+        }
+        else if (minutes % 5 == 0)
+        {
+            if (minutes % 15 == 0)
+            {
+                ClockFace[minutes] = YELLOW;
+            }
+            else
+            {
+                ClockFace[minutes] = WHITE;
+            }
+        }
     }
 
-    if (stepLength < 3000)
+    // calculate/assign hours only when minutes gets back to 0
+    if (newminutes == 0)
     {
-        // fourth gear
-        digitalWrite(LED2, HIGH);
-        steps = 2;
+        newhours = (int)(milliseconds / 3600000.0) % 12;
+        ClockFace[hours] = BLACK; // blank the old one
+        // if the hour hand was "covering" something else, rewrite that w supercession
+        if (hours % 5 == 0)
+        {
+            if (hours % 15 == 0)
+            {
+                ClockFace[hours] = YELLOW;
+            }
+            else
+            {
+                ClockFace[hours] = WHITE;
+            }
+        }
     }
+
+    if (newminutes == 0)
+        ClockFace[newhours] = GREEN; // write the new one
+    if (newseconds == 0)
+        ClockFace[newminutes] = BLUE; // write the new one
+    ClockFace[newseconds] = RED;      // write the new one
+
+    seconds = newseconds;
+    minutes = newminutes;
+    hours = newhours;
 }
