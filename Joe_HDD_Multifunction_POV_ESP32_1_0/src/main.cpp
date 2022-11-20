@@ -34,9 +34,27 @@ const int daylightOffset_sec = 3600;
 const char *ntpServer1 = "time.nist.gov";
 const char *ntpServer2 = "pool.ntp.org";
 
-int hours = 0;   // 0-23
-int minutes = 0; // 0-59
-int seconds = 0; // 0-59
+const byte BLACK = 0b00000000;   // RGB 000 mapped to Port B LED pins
+const byte RED = 0b00000010;     // RGB 001 mapped to Port B LED pins
+const byte GREEN = 0b00000100;   // RGB 010 mapped to Port B LED pins
+const byte YELLOW = 0b00000110;  // RGB 011 mapped to Port B LED pins
+const byte BLUE = 0b00001000;    // RGB 100 mapped to Port B LED pins
+const byte MAGENTA = 0b00001010; // RGB 101 mapped to Port B LED pins
+const byte CYAN = 0b00001100;    // RGB 110 mapped to Port B LED pins
+const byte WHITE = 0b00001110;   // RGB 111 mapped to Port B LED pins
+
+const String RGBstr[8] = {"Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White"};
+
+byte ClockFace[60];    // 60 valid positions, each with 3-bit RGB value to be displayed
+int clockPosition = 0; // position (0-59) on the clockface; index for ClockFace[]
+
+int hours = 0;         // 0-23
+int minutes = 0;       // 0-59
+int seconds = 0;       // 0-59
+long milliseconds = 0; //
+int newseconds = 0;    // integer number of seconds
+int newminutes = 0;    // integer number of minutes
+int newhours = 0;      // integer number of hours
 
 // ToDO - calibration (for now 8.4ms period = 60 x 140us slots)
 int slotWidth = 140;
@@ -71,9 +89,12 @@ struct buttonInterruptLine
 };
 buttonInterruptLine buttonPress = {buttonInterruptPin, 0, false};
 
+int i = 0, j = 0; // integer loop counters
+
 // --------------- function declarations ---------------
 void setMyTime();
 void printLocalTime();
+void blink();
 
 // --------------- interrupt function declarations ---------------
 void IRAM_ATTR trigger()
@@ -81,7 +102,11 @@ void IRAM_ATTR trigger()
     photoTrigger.numHits++;
     photoTrigger.TRIGGERED = true;
 }
-void IRAM_ATTR press()
+
+/*------------------------------------------------------------------------------
+   set_loop_fn() -- called by setup and by interrupt
+  ------------------------------------------------------------------------------*/
+void IRAM_ATTR set_loop_fn()
 {
     buttonPress.numHits++;
     buttonPress.PRESSED = true;
@@ -102,6 +127,12 @@ void IRAM_ATTR onSlotTimer()
 //--------------- setup() --------------------------------
 void setup()
 {
+    // Give me 5 seconds to spin up the disk (note: can't use delay with interrupts off)
+    delay(5000);
+
+    // no interrupts
+    cli();
+
     Serial.begin(115200);
     Serial.println("Starting setup()...");
 
@@ -125,7 +156,7 @@ void setup()
 
     // configure function pushbutton interrupt
     pinMode(buttonPress.PIN, INPUT_PULLUP);
-    attachInterrupt(buttonPress.PIN, press, FALLING);
+    attachInterrupt(buttonPress.PIN, set_loop_fn, FALLING);
 
     // configure 4 x digital input pins used to select function
     io_conf.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE;
@@ -166,6 +197,16 @@ void setup()
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     Serial.println("WiFi disconnected");
+
+    // read function from pattern bits (call isr for artificial button press)
+    set_loop_fn();
+
+    // enable global interrupts
+    sei();
+
+    // demonstrate setup (blink uses delay, so it needs interrupts turned on
+    blink();
+    Serial.println("Done setup; now enabling interrupts");
 
     Serial.println("setup complete");
 }
@@ -260,4 +301,32 @@ void setLocalTime()
     minutes = timeinfo.tm_min;
     seconds = timeinfo.tm_sec;
     // Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
+}
+
+/*------------------------------------------------------------------------------
+   blink()
+  ------------------------------------------------------------------------------*/
+void blink()
+{
+    for (i = 0; i <= 2; i++)
+    {
+        GPIO.out_w1ts = (1 << RED_LED);
+        delay(100);
+        GPIO.out_w1tc = (1 << RED_LED);
+        delay(100);
+    }
+    for (i = 0; i <= 3; i++)
+    {
+        GPIO.out_w1ts = (1 << GREEN_LED);
+        delay(100);
+        GPIO.out_w1tc = (1 << GREEN_LED);
+        delay(100);
+    }
+    for (i = 0; i <= 3; i++)
+    {
+        GPIO.out_w1ts = (1 << BLUE_LED);
+        delay(100);
+        GPIO.out_w1tc = (1 << BLUE_LED);
+        delay(100);
+    }
 }
