@@ -73,7 +73,7 @@ bool INITIALIZED = false; // clockface initialized?
 
 //-----[ user-configurable factors - emperically determined ]------------------------
 // const int compareTicks = 763; // actually observed
-const int offset = 14; // number of "seconds" to rotate display for orientation
+const int offset = 5; // (14) number of "seconds" slots to rotate display (ccw) for orientation
 //-----------------------------------------------------------------------------------
 
 // ToDO - calibration (for now 21.6ms period = 60 x 360us slots)
@@ -399,6 +399,7 @@ void printLocalTime()
 //--------------- printLocalTime() --------------------------------
 void setLocalTime()
 {
+    time(&timeNow);
     localtime_r(&timeNow, &timeinfo);
     newhours = (timeinfo.tm_hour % 12);
     newminutes = timeinfo.tm_min;
@@ -475,8 +476,8 @@ void calculateClockFace()
     //   if more than one hand is in the same position on the clock
     // Calculate/assign seconds every time b/c this function is called every second
 
-    setLocalTime;  // should be current, as long as NTP set it in setup()
-    
+    setLocalTime(); // should be current, as long as NTP set it in setup()
+
     ClockFace[seconds] = BLACK; // blank the old one
     // if the old second hand was "covering" something else, rewrite that w supercession
     if (seconds == minutes)
@@ -548,6 +549,7 @@ void calculateClockFace()
     seconds = newseconds;
     minutes = newminutes;
     hours = newhours;
+    // Serial.printf("%d:%d:%d\n", hours, minutes, seconds);
 }
 
 /*------------------------------------------------------------------------------
@@ -555,6 +557,7 @@ void calculateClockFace()
   ------------------------------------------------------------------------------*/
 void loop_fn_clock()
 {
+    Serial.println("In loop_fn_clock()");
     // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
     GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
     // protect from interruption; enable slot timer, disable other timer(s) while in this function
@@ -565,6 +568,7 @@ void loop_fn_clock()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
+    Serial.println("loop_fn_clock() - configured timers");
 
     // perform this function until reset
     while (!buttonPress.PRESSED)
@@ -583,7 +587,7 @@ void loop_fn_clock()
         }
 
         // display clock face
-        if (ENDSLOT)  // spinning slot has arrived at new clock slot position
+        if (ENDSLOT) // spinning slot has arrived at new clock slot position
         {
             clockPosition++;
             // set my active LED bits - up to the 60th position
@@ -609,9 +613,9 @@ void loop_fn_clock()
 }
 
 // --- other function placeholders for now
-void loop_fn_radar(){;}
-void loop_fn_RedBlack(){;}
-void loop_fn_colors(){;}
-void loop_fn_checkers(){;}
-void loop_fn_checker_colors(){;}
-void loop_fn_fan(){;}
+void loop_fn_radar() { ; }
+void loop_fn_RedBlack() { ; }
+void loop_fn_colors() { ; }
+void loop_fn_checkers() { ; }
+void loop_fn_checker_colors() { ; }
+void loop_fn_fan() { ; }

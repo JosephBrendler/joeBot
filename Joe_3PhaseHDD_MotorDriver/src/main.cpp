@@ -31,7 +31,9 @@
 
 // define baseline starting and minimum driver signal pulse length
 uint32_t stepLength = 40000;  // us (Bart: 40000) (this is the duration of delay in each stage of the 3-phase signal)
-uint16_t minStepLength = 900; // us (Bart: 1400) (driving 2 x disk platters, I can't go that fast)
+uint16_t minStepLength = 900; // us (Bart: 1400) 
+// driving 2 x disk platters, I couldn't go that fast until I switched to quatriture SRM (six stages, overlapping)
+// then I got as fast as 900 somewhat stable in "5th gear" , but (POV patterns are "wobbly" -- switching back to 1400)
 
 // define how much each cycle will reduce the driver signal pulse duration
 const int firstGearSteps = 50;   // us (Bart: 5)
