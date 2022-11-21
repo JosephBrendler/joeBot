@@ -57,6 +57,8 @@ const byte WHITE = 0b111;
 
 const String RGBstr[8] = {"Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White"};
 
+uint8_t pattern = 0; // what pattern (function) to draw
+
 byte ClockFace[60];    // 60 valid positions, each with 3-bit RGB value to be displayed
 int clockPosition = 0; // position (0-59) on the clockface; index for ClockFace[]
 
@@ -69,8 +71,15 @@ int newminutes = 0;       // integer number of minutes
 int newhours = 0;         // integer number of hours
 bool INITIALIZED = false; // clockface initialized?
 
-// ToDO - calibration (for now 8.4ms period = 60 x 140us slots)
-int slotWidth = 140;
+//-----[ user-configurable factors - emperically determined ]------------------------
+// const int compareTicks = 763; // actually observed
+const int offset = 14; // number of "seconds" to rotate display for orientation
+//-----------------------------------------------------------------------------------
+
+// ToDO - calibration (for now 21.6ms period = 60 x 360us slots)
+int slotWidth = 360;
+
+const unsigned int intervalOn = (unsigned int)(slotWidth / 3); // draw skinnier lines
 
 int function = 0; // function read from 4 bits, selected by pushbutton
 
@@ -108,6 +117,13 @@ int i = 0, j = 0; // integer loop counters
 void setMyTime();
 void printLocalTime();
 void blink();
+void loop_fn_clock();
+void loop_fn_radar();
+void loop_fn_RedBlack();
+void loop_fn_colors();
+void loop_fn_checkers();
+void loop_fn_checker_colors();
+void loop_fn_fan();
 
 // --------------- interrupt function declarations ---------------
 void IRAM_ATTR trigger()
@@ -131,12 +147,14 @@ void IRAM_ATTR onSecondTimer()
     MARKSECOND = true;
     portEXIT_CRITICAL(&secondTimerMux);
 }
+
 void IRAM_ATTR onSlotTimer()
 {
     portENTER_CRITICAL(&slotTimerMux);
     ENDSLOT = true;
     portEXIT_CRITICAL(&slotTimerMux);
 }
+
 //--------------- setup() --------------------------------
 void setup()
 {
@@ -246,8 +264,8 @@ void setup()
     Serial.println("---------------[ Runtime Output Follows ]-------------------");
 }
 
-//--------------- loop() --------------------------------
-void loop()
+//--------------- old_loop() --------------------------------
+void old_loop()
 {
     // first handle flagged interrupts, then do other stuff
     if (photoTrigger.TRIGGERED)
@@ -264,8 +282,8 @@ void loop()
     if (buttonPress.PRESSED)
     {
         // read input pins, to set function - 4 x bits are active LOW so substract from 0xff
-        uint8_t state = 0xff - (GPIO_REG_READ(GPIO_IN_REG) >> functionBit0) & 0b1111;
-        Serial.printf("Selected: [%d], Pressed %d times\n", state, buttonPress.numHits);
+        pattern = 0xff - (GPIO_REG_READ(GPIO_IN_REG) >> functionBit0) & 0b1111;
+        Serial.printf("Selected: [%d], Pressed %d times\n", pattern, buttonPress.numHits);
         buttonPress.PRESSED = false;
     }
     if (ENDSLOT)
@@ -295,6 +313,56 @@ void loop()
         portEXIT_CRITICAL(&slotTimerMux);
     }
     // now do other stuff
+}
+
+/*------------------------------------------------------------------------------
+   loop()
+  ------------------------------------------------------------------------------*/
+void loop()
+{
+    if (buttonPress.PRESSED)
+    {
+        // read input pins, to set function - 4 x bits are active LOW so substract from 0xff
+        pattern = 0xff - (GPIO_REG_READ(GPIO_IN_REG) >> functionBit0) & 0b1111;
+        Serial.printf("Selected: [%d], Pressed %d times\n", pattern, buttonPress.numHits);
+        buttonPress.PRESSED = false;
+    }
+    // Note: pattern bits are active low, so take the bitwise NOT of pattern
+    switch (pattern)
+    {
+    case 0:
+        // Serial.println("Executing clock function");
+        loop_fn_clock();
+        break;
+    case 1:
+        // Serial.println("Executing radar function");
+        loop_fn_radar();
+        break;
+    case 2:
+        // Serial.println("Executing RedBlack function");
+        loop_fn_RedBlack();
+        break;
+    case 3:
+        // Serial.println("Executing colors function");
+        loop_fn_colors();
+        break;
+    case 4:
+        // Serial.println("Executing checkers function");
+        loop_fn_checkers();
+        break;
+    case 5:
+        // Serial.println("Executing checker_colors function");
+        loop_fn_checker_colors();
+        break;
+    case 6:
+        loop_fn_fan();
+        break;
+    // with current hardware (10 pos. rotary fn switch), cases 7, 8, 9 fall to default
+    default:
+        loop_fn_clock();
+        break;
+    }
+    delayMicroseconds(1);
 }
 
 //--------------- setMyTime() --------------------------------
@@ -332,10 +400,10 @@ void printLocalTime()
 void setLocalTime()
 {
     localtime_r(&timeNow, &timeinfo);
-    hours = (timeinfo.tm_hour % 12);
-    minutes = timeinfo.tm_min;
-    seconds = timeinfo.tm_sec;
-    // Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", hours, minutes, seconds);
+    newhours = (timeinfo.tm_hour % 12);
+    newminutes = timeinfo.tm_min;
+    newseconds = timeinfo.tm_sec;
+    // Serial.printf("Hours: %d, Minutes: %d, Seconds: %d\n", newhours, newminutes, newseconds);
 }
 
 /*------------------------------------------------------------------------------
@@ -406,7 +474,9 @@ void calculateClockFace()
     // Assign (if needed) in this order so each supercedes previous,
     //   if more than one hand is in the same position on the clock
     // Calculate/assign seconds every time b/c this function is called every second
-    newseconds = (int)(milliseconds / 1000.0) % 60;
+
+    setLocalTime;  // should be current, as long as NTP set it in setup()
+    
     ClockFace[seconds] = BLACK; // blank the old one
     // if the old second hand was "covering" something else, rewrite that w supercession
     if (seconds == minutes)
@@ -429,10 +499,9 @@ void calculateClockFace()
         }
     }
 
-    // calculate/assign minutes only when seconds gets back to 0
+    // assign minutes only when seconds gets back to 0
     if (newseconds == 0)
     {
-        newminutes = (int)(milliseconds / 60000.0) % 60;
         ClockFace[minutes] = BLACK; // blank the old one
         // if the minute hand was "covering" something else, rewrite that w supercession
         if (minutes == hours)
@@ -452,10 +521,9 @@ void calculateClockFace()
         }
     }
 
-    // calculate/assign hours only when minutes gets back to 0
+    // assign hours only when minutes gets back to 0
     if (newminutes == 0)
     {
-        newhours = (int)(milliseconds / 3600000.0) % 12;
         ClockFace[hours] = BLACK; // blank the old one
         // if the hour hand was "covering" something else, rewrite that w supercession
         if (hours % 5 == 0)
@@ -481,3 +549,69 @@ void calculateClockFace()
     minutes = newminutes;
     hours = newhours;
 }
+
+/*------------------------------------------------------------------------------
+   function 0:  loop_fn_clock()
+  ------------------------------------------------------------------------------*/
+void loop_fn_clock()
+{
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; enable slot timer, disable other timer(s) while in this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmWrite(slotTimer, (slotWidth), true); // make this auto-reloading for this function
+    timerAlarmEnable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        // (process trigger interrupt)
+        if (photoTrigger.TRIGGERED)
+        {
+            clockPosition = 0; // ToDo -- use relative number to "align the clock face"
+            // display the 0-marker; provides offset and reverses b/c disk rotates ccw
+            // (then write 3-bit RGB to the consecutive LED register bits)
+            GPIO.out_w1ts = ((ClockFace[59 - ((offset + clockPosition) % 60)]) << RED_LED);
+            // now delay slotwidth and then turn them off
+            delayMicroseconds(intervalOn);
+            GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+            photoTrigger.TRIGGERED = false; // lower the Triggered flag
+        }
+
+        // display clock face
+        if (ENDSLOT)  // spinning slot has arrived at new clock slot position
+        {
+            clockPosition++;
+            // set my active LED bits - up to the 60th position
+            if (clockPosition < 60)
+            { // provides offset and reverses b/c disk rotates ccw
+                GPIO.out_w1ts = ((ClockFace[59 - ((offset + clockPosition) % 60)]) << RED_LED);
+                // now delay slotwidth and then turn them off
+                delayMicroseconds(intervalOn);
+                GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+                ;
+            }
+            ENDSLOT = false; // lower the clockTick flag
+        }
+
+        // every 1 seconds, recalculate the time
+        // assign milliseconds here to avoid having to do so again in calculateClockFace()
+        milliseconds = millis();
+        if (milliseconds % 1000 == 0)
+        {
+            calculateClockFace();
+        }
+    }
+}
+
+// --- other function placeholders for now
+void loop_fn_radar(){;}
+void loop_fn_RedBlack(){;}
+void loop_fn_colors(){;}
+void loop_fn_checkers(){;}
+void loop_fn_checker_colors(){;}
+void loop_fn_fan(){;}
