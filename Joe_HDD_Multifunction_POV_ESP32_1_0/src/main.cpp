@@ -19,6 +19,8 @@
 #define functionBit2 14 // bit 2 of function selected; gpio 14; pin 12
 #define functionBit3 15 // bit 3 (msb) of function7 selected; gpio 15; pin 23
 
+#define checkerNumber_pin 36 // analog in; ADC0; pin 3
+
 // used to set LED2 (active HIGH on ESP32, LOW on 8266)
 #define LED_ON HIGH
 #define LED_OFF LOW
@@ -34,30 +36,21 @@ const int daylightOffset_sec = 3600;
 const char *ntpServer1 = "time.nist.gov";
 const char *ntpServer2 = "pool.ntp.org";
 
-/*
-const byte BLACK = 0b00000000;   // RGB 000 mapped to Port B LED pins
-const byte RED = 0b00000010;     // RGB 001 mapped to Port B LED pins
-const byte GREEN = 0b00000100;   // RGB 010 mapped to Port B LED pins
-const byte YELLOW = 0b00000110;  // RGB 011 mapped to Port B LED pins
-const byte BLUE = 0b00001000;    // RGB 100 mapped to Port B LED pins
-const byte MAGENTA = 0b00001010; // RGB 101 mapped to Port B LED pins
-const byte CYAN = 0b00001100;    // RGB 110 mapped to Port B LED pins
-const byte WHITE = 0b00001110;   // RGB 111 mapped to Port B LED pins
-*/
-
 // define 3-bit RGB color values
 const byte BLACK = 0b000;
 const byte RED = 0b001;
 const byte GREEN = 0b010;
-const byte YELLOW = 0b010;
+const byte YELLOW = 0b011;
 const byte BLUE = 0b100;
 const byte MAGENTA = 0b101;
 const byte CYAN = 0b110;
 const byte WHITE = 0b111;
 
-const String RGBstr[8] = {"Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White"};
+// Map to 3-bit RGB colors
+const String RGBstr[8] = {"Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"};
 
-uint8_t pattern = 0; // what pattern (function) to draw
+uint8_t pattern = 0;       // what pattern (function) to draw
+uint8_t checkerNumber = 0; // how many times to repeat pattern (mapped from analog in)
 
 byte ClockFace[60];    // 60 valid positions, each with 3-bit RGB value to be displayed
 int clockPosition = 0; // position (0-59) on the clockface; index for ClockFace[]
@@ -81,7 +74,8 @@ const int offset = 5; // (14) number of "seconds" slots to rotate display (ccw) 
 // ToDO - calibration (for now 21.6ms period = 60 x 360us slots)
 const unsigned int slotWidth = 360;
 
-const unsigned int intervalOn = (unsigned int)(slotWidth / 3); // draw skinnier lines
+const unsigned int intervalOn = (unsigned int)(slotWidth / 3);           // draw skinnier lines
+const unsigned int intervalOff = (unsigned int)(slotWidth - intervalOn); // draw skinnier lines
 
 int function = 0; // function read from 4 bits, selected by pushbutton
 
@@ -126,6 +120,9 @@ void loop_fn_colors();
 void loop_fn_checkers();
 void loop_fn_checker_colors();
 void loop_fn_fan();
+void loop_fn_altClock();
+void loop_fn_multicolor_fan();
+void dumpClockFace(); // for debugging
 
 // --------------- interrupt function declarations ---------------
 /*------------------------------------------------------------------------------
@@ -310,9 +307,15 @@ void loop()
     case 6:
         loop_fn_fan();
         break;
-    // with current hardware (10 pos. rotary fn switch), cases 7, 8, 9 fall to default
-    default:
-        loop_fn_clock();
+    case 7:
+        loop_fn_altClock();
+        break;
+    case 8:
+        loop_fn_multicolor_fan();
+        break;
+        
+            // with current hardware (10 pos. rotary fn switch), case 9 falls to default (0)
+            default : loop_fn_clock();
         break;
     }
     delayMicroseconds(1);
@@ -423,6 +426,10 @@ void calculateClockFace()
         // raise flag
         INITIALIZED = true;
     }
+    // display old time first, then adjust
+    ClockFace[(hours * 5)] = GREEN;
+    ClockFace[minutes] = BLUE;
+    ClockFace[seconds] = RED;
 
     // Get new time; change only values that need to be changed
     // Assign (if needed) in this order so each supercedes previous,
@@ -439,9 +446,9 @@ void calculateClockFace()
         {
             ClockFace[minutes] = BLUE;
         }
-        else if (seconds == hours)
+        else if (seconds == (hours * 5))
         {
-            ClockFace[hours] = GREEN;
+            ClockFace[(hours * 5)] = GREEN;
         }
         else if (seconds % 5 == 0)
         {
@@ -460,9 +467,9 @@ void calculateClockFace()
         {
             ClockFace[minutes] = BLACK; // blank the old one
             // if the minute hand was "covering" something else, rewrite that w supercession
-            if (minutes == hours)
+            if (minutes == (hours * 5))
             {
-                ClockFace[hours] = GREEN;
+                ClockFace[(hours * 5)] = GREEN;
             }
             else if (minutes % 5 == 0)
             {
@@ -480,22 +487,22 @@ void calculateClockFace()
         // assign hours only when minutes gets back to 0
         if (newminutes == 0)
         {
-            ClockFace[hours] = BLACK; // blank the old one
+            ClockFace[(hours * 5)] = BLACK; // blank the old one
             // if the hour hand was "covering" something else, rewrite that w supercession
-            if (hours % 5 == 0)
+            if ((hours * 5) % 5 == 0)
             {
-                if (hours % 15 == 0)
+                if ((hours * 5) % 15 == 0)
                 {
-                    ClockFace[hours] = YELLOW;
+                    ClockFace[(hours * 5)] = YELLOW;
                 }
                 else
                 {
-                    ClockFace[hours] = WHITE;
+                    ClockFace[(hours * 5)] = WHITE;
                 }
             }
         }
         if (newminutes == 0)
-            ClockFace[newhours] = GREEN; // write the new one
+            ClockFace[(newhours * 5)] = GREEN; // write the new one
         if (newseconds == 0)
             ClockFace[newminutes] = BLUE; // write the new one
         ClockFace[newseconds] = RED;      // write the new one
@@ -508,7 +515,19 @@ void calculateClockFace()
 }
 
 /*------------------------------------------------------------------------------
-   function 0:  loop_fn_clock()
+   dumpClockFace() - dump contents of the clockFace[] array - translate RGB colors
+  ------------------------------------------------------------------------------*/
+void dumpClockFace()
+{
+    Serial.println("[pos]: RGB value");
+    for (i = 0; i <= 59; i++)
+    {
+        Serial.printf("[ %02d]: %s\n", i, RGBstr[ClockFace[i]]);
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function 0:  loop_fn_clock() - display an accurate clock face
   ------------------------------------------------------------------------------*/
 void loop_fn_clock()
 {
@@ -523,7 +542,7 @@ void loop_fn_clock()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    Serial.println("- configured timers");
+    Serial.println("- configured");
 
     // perform this function until reset
     while (!buttonPress.PRESSED)
@@ -589,7 +608,7 @@ void loop_fn_radar()
     uint64_t thisTrigger = 0;
     uint64_t delta = 0;
 
-    Serial.println("- configured timers");
+    Serial.println("- configured");
 
     lastTrigger = micros();
     // perform this function until reset
@@ -628,7 +647,7 @@ void loop_fn_radar()
 }
 
 /*------------------------------------------------------------------------------
-   function 2: loop_fn_RedBlack() -- display the color pattern
+   function 2: loop_fn_RedBlack() -- display the red-black pattern
   ------------------------------------------------------------------------------*/
 void loop_fn_RedBlack()
 {
@@ -649,7 +668,7 @@ void loop_fn_RedBlack()
     uint64_t thisTrigger = 0;
     uint64_t delta = 0;
 
-    Serial.println("- configured timers");
+    Serial.println("- configured");
 
     lastTrigger = micros();
     // perform this function until reset
@@ -682,9 +701,343 @@ void loop_fn_RedBlack()
     }
 }
 
-// --- other function placeholders for now
+/*------------------------------------------------------------------------------
+   function 3: loop_fn_colors() -- display the color pattern
+  ------------------------------------------------------------------------------*/
+void loop_fn_colors()
+{
+    Serial.println("In loop_fn_colors()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) to start this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+    uint64_t radarSlot = 0;        // also in ticks
 
-void loop_fn_colors() { ; }
-void loop_fn_checkers() { ; }
-void loop_fn_checker_colors() { ; }
-void loop_fn_fan() { ; }
+    uint64_t lastTrigger = 0;
+    uint64_t thisTrigger = 0;
+    uint64_t delta = 0;
+
+    Serial.println("- configured");
+
+    lastTrigger = micros();
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        if (photoTrigger.TRIGGERED) // start pattern
+        {
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            thisTrigger = micros();
+            delta = thisTrigger - lastTrigger;
+            lastTrigger = thisTrigger;
+            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
+                ((periodMicros < delta) && (delta - periodMicros) < 1000))
+            {
+                periodMicros = delta;
+            }
+
+            // draw 8 bands of 3-bit RGB color
+            for (i = 0; i <= 7; i++)
+            {
+                GPIO.out_w1ts = (i << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+                delayMicroseconds(int(periodMicros / 8.0));
+                GPIO.out_w1tc = (i << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+            }
+            photoTrigger.numHits++;
+            // set flags
+            photoTrigger.TRIGGERED = false;
+        }
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function 4: loop_fn_checkers() -- display the checker pattern
+  ------------------------------------------------------------------------------*/
+void loop_fn_checkers()
+{
+    Serial.println("In loop_fn_checkers()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) to start this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+    uint64_t radarSlot = 0;        // also in ticks
+
+    uint64_t lastTrigger = 0;
+    uint64_t thisTrigger = 0;
+    uint64_t delta = 0;
+
+    Serial.println("- configured");
+
+    lastTrigger = micros();
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        // get an even number between 0 and 30, for checker pattern
+        checkerNumber = 2 * map(analogRead(checkerNumber_pin), 0, 1023, 0, 15);
+        if (photoTrigger.TRIGGERED) // start pattern
+        {
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            thisTrigger = micros();
+            delta = thisTrigger - lastTrigger;
+            lastTrigger = thisTrigger;
+            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
+                ((periodMicros < delta) && (delta - periodMicros) < 1000))
+            {
+                periodMicros = delta;
+            }
+
+            // draw 8 bands alternating red/black
+            for (i = 0; i <= checkerNumber; i++)
+            {
+                GPIO.out_w1ts = (RED << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+                delayMicroseconds(int(periodMicros / checkerNumber));
+                GPIO.out_w1tc = (RED << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+                delayMicroseconds(int(periodMicros / checkerNumber));
+            }
+            photoTrigger.numHits++;
+            // set flags
+            photoTrigger.TRIGGERED = false;
+        }
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function5: loop_fn_checker_colors() -- display the checker colors pattern
+  ------------------------------------------------------------------------------*/
+void loop_fn_checker_colors()
+{
+    Serial.println("In loop_fn_checker_colors()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) to start this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+    uint64_t radarSlot = 0;        // also in ticks
+
+    uint64_t lastTrigger = 0;
+    uint64_t thisTrigger = 0;
+    uint64_t delta = 0;
+
+    Serial.println("- configured");
+
+    lastTrigger = micros();
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        // get an even number between 0 and 60, for checker pattern
+        checkerNumber = 2 * map(analogRead(checkerNumber_pin), 0, 1023, 0, 30);
+        if (photoTrigger.TRIGGERED) // start pattern
+        {
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            thisTrigger = micros();
+            delta = thisTrigger - lastTrigger;
+            lastTrigger = thisTrigger;
+            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
+                ((periodMicros < delta) && (delta - periodMicros) < 1000))
+            {
+                periodMicros = delta;
+            }
+
+            // draw 8 bands alternating red/black
+            for (i = 0; i <= checkerNumber; i++)
+            {
+                GPIO.out_w1ts = (i << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+                delayMicroseconds(int(periodMicros / checkerNumber));
+                GPIO.out_w1tc = (i << RED_LED); // RGB value shifted into consecutive register bits (red led is lsb)
+            }
+            photoTrigger.numHits++;
+            // set flags
+            photoTrigger.TRIGGERED = false;
+        }
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function 6: loop_fn_fan() -- display the fan pattern
+  ------------------------------------------------------------------------------*/
+void loop_fn_fan()
+{
+    Serial.println("In loop_fn_fan()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) to start this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+    uint64_t radarSlot = 0;        // also in ticks
+
+    uint64_t lastTrigger = 0;
+    uint64_t thisTrigger = 0;
+    uint64_t delta = 0;
+
+    Serial.println("- configured");
+
+    lastTrigger = micros();
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        if (photoTrigger.TRIGGERED) // start pattern
+        {
+
+            // mark sync spot
+            GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+            delayMicroseconds(intervalOn);
+            GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            thisTrigger = micros();
+            delta = thisTrigger - lastTrigger;
+            lastTrigger = thisTrigger;
+            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
+                ((periodMicros < delta) && (delta - periodMicros) < 1000))
+            {
+                periodMicros = delta;
+            }
+            milliseconds = millis();
+            radarSlot = (uint64_t)(periodMicros * (milliseconds % 5000) / 5000.0);
+            // Serial.printf("radarSlot: %d\n", radarSlot);
+
+            GPIO.out_w1ts = (RED << RED_LED);
+            delayMicroseconds(radarSlot);
+            GPIO.out_w1ts = (WHITE << RED_LED);
+            delayMicroseconds(intervalOn);
+            GPIO.out_w1tc = (WHITE << RED_LED); // clearing white draws black
+
+            photoTrigger.numHits++;
+            // set flags
+            photoTrigger.TRIGGERED = false;
+        }
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function 7:  loop_fn_altClock() - display an accurate clock face
+  ------------------------------------------------------------------------------*/
+void loop_fn_altClock()
+{
+    Serial.println("In loop_fn_altClock()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) while in this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    Serial.println("- configured");
+
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        // (process trigger interrupt)
+        if (photoTrigger.TRIGGERED)
+        {
+            // ToDo -- use relative number to "align the clock face"
+            // display the 0-marker; provides offset and reverses b/c disk rotates ccw
+            // (then write 3-bit RGB to the consecutive LED register bits)
+            for (i = 0; i <= 59; i++)
+            {
+                GPIO.out_w1ts = ((ClockFace[59 - ((offset + i) % 60)]) << RED_LED);
+                // now delay slotwidth and then turn them off
+                delayMicroseconds(intervalOn);
+                GPIO.out_w1tc = (WHITE << RED_LED); // clear WHITE = draw BLACK
+                delayMicroseconds(intervalOff);
+            }
+            photoTrigger.numHits++;
+            photoTrigger.TRIGGERED = false; // lower the Triggered flag
+        }
+
+        // every 1 seconds, recalculate the time
+        // assign milliseconds here to avoid having to do so again in calculateClockFace()
+        milliseconds = millis();
+        if (milliseconds % 1000 == 0)
+        {
+            calculateClockFace();
+            // dumpClockFace();
+            // exit(0);
+        }
+    }
+}
+
+/*------------------------------------------------------------------------------
+   function 8: loop_fn_multicolor_fan() -- display a multicolor fan pattern
+  ------------------------------------------------------------------------------*/
+void loop_fn_multicolor_fan()
+{
+    Serial.println("In loop_fn_multicolor_fan()");
+    // turn LEDs off (clear output pins -- my LEDs are active LOW but driven by inverting NPN transistors)
+    GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+    // protect from interruption; disable timer(s) to start this function
+    portENTER_CRITICAL(&slotTimerMux);
+    timerAlarmDisable(slotTimer);
+    portEXIT_CRITICAL(&slotTimerMux);
+    portENTER_CRITICAL(&secondTimerMux);
+    timerAlarmDisable(secondTimer);
+    portEXIT_CRITICAL(&secondTimerMux);
+    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+    uint64_t radarSlot = 0;        // also in ticks
+
+    uint64_t lastTrigger = 0;
+    uint64_t thisTrigger = 0;
+    uint64_t delta = 0;
+
+
+    Serial.println("- configured");
+
+    lastTrigger = micros();
+    // perform this function until reset
+    while (!buttonPress.PRESSED)
+    {
+        if (photoTrigger.TRIGGERED) // start pattern
+        {
+            // get a number between 0 and 7, for RGB value of fan pattern
+            checkerNumber = map(analogRead(checkerNumber_pin), 0, 1023, 0, 7);
+            // mark sync spot
+            GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+            delayMicroseconds(intervalOn);
+            GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            thisTrigger = micros();
+            delta = thisTrigger - lastTrigger;
+            lastTrigger = thisTrigger;
+            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
+                ((periodMicros < delta) && (delta - periodMicros) < 1000))
+            {
+                periodMicros = delta;
+            }
+            milliseconds = millis();
+            radarSlot = (uint64_t)(periodMicros * (milliseconds % 5000) / 5000.0);
+            // Serial.printf("radarSlot: %d\n", radarSlot);
+
+            GPIO.out_w1ts = (checkerNumber << RED_LED);
+            delayMicroseconds(radarSlot);
+            GPIO.out_w1ts = (WHITE << RED_LED);
+            delayMicroseconds(intervalOn);
+            GPIO.out_w1tc = (WHITE << RED_LED); // clearing white draws black
+
+            photoTrigger.numHits++;
+            // set flags
+            photoTrigger.TRIGGERED = false;
+        }
+    }
+}
