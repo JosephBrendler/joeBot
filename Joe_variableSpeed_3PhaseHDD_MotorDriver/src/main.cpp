@@ -4,20 +4,23 @@ const int phase1pin = D5;
 const int phase2pin = D6;
 const int phase3pin = D7;
 
-float holdTime;
-float targetSpeed;
-
 unsigned long p1start,
     p1end,
     p2start,
     p2end,
     p3start,
-    p3end;
+    p3end,
+    currentTime,
+    refractory,
+    td;
 
-// Change these until you find your min and max speeds.
-// This looks backwards because min/max are pulse length (us) inversly proportional to speed
-float min = 3200;
-float max = 50000;
+float holdTime;
+float targetHoldTime;
+
+// Change these until you find your minPulse and maxPulse speeds.
+// This looks backwards because minPulse/maxPulse are pulse length (us) inversly proportional to speed
+float minPulse = 5000.0;
+float maxPulse = 50000.0;
 
 void setup()
 {
@@ -25,6 +28,8 @@ void setup()
     pinMode(phase1pin, OUTPUT);
     pinMode(phase2pin, OUTPUT);
     pinMode(phase3pin, OUTPUT);
+    Serial.println("");
+    Serial.println("setup() complete. \nEnter command. (e.g. 50 forward)");
 }
 
 String direction;
@@ -40,9 +45,9 @@ float status;
 // a new cycle starts at 2.25 (or whatever "refractory changes to")
 void chkP1(int pin)
 {
-    unsigned long currentTime = micros();
-    unsigned long td = currentTime - p1start;
-    unsigned long refractory = 2.25 * holdTime;
+    currentTime = micros();
+    td = currentTime - p1start;
+    refractory = 2.25 * holdTime;
     if (digitalRead(pin))
     {
         if (td > holdTime)
@@ -60,8 +65,8 @@ void chkP1(int pin)
 
 void chkP2(int pin)
 {
-    unsigned long currentTime = micros();
-    unsigned long td = currentTime - p1start;
+    currentTime = micros();
+    td = currentTime - p1start;
     if (digitalRead(pin))
     {
         if (td > 1.75 * holdTime || td < 0.75 * holdTime)
@@ -79,8 +84,8 @@ void chkP2(int pin)
 
 void chkP3(int pin)
 {
-    unsigned long currentTime = micros();
-    unsigned long td = currentTime - p1start;
+    currentTime = micros();
+    td = currentTime - p1start;
     if (digitalRead(pin))
     {
         if (td > 0.25 * holdTime && p3start < p1start)
@@ -96,19 +101,19 @@ void chkP3(int pin)
     }
 }
 
-void setupMotor(float input_targetSpeed, String new_direction)
+void setupMotor(float inputPercent, String new_direction)
 {
     // Converts the percent value into something usable
-    // This looks backwards because min/max are pulse length (us) inversly proportional to speed
-    targetSpeed = max - ((max - min) * (input_targetSpeed * 0.01));
+    // This looks backwards because minPulse/maxPulse are pulse length (us) inversly proportional to speed
+    targetHoldTime = maxPulse - ((maxPulse - minPulse) * (inputPercent * 0.01));
 
     // See if the direction has changed
     if (new_direction != direction)
     {
-        holdTime = 20000;
+        holdTime = targetHoldTime / 2.0;  // (20000) set to mid range and then adjust
         direction = new_direction;
         // Wait for it to stop, weird things can happen if it's still moving.
-        delay(500);
+        delay(1500);  // (500)
 
         // Initialize first phase - get it moving
         if (direction == "forward")
@@ -130,11 +135,13 @@ void loop()
     if (Serial.available() > 0)
     {
         // Read serial input ex. "100 reverse" or "50 forward"
-        float input_targetSpeed = Serial.readStringUntil(' ').toInt();
+        float inputPercent = Serial.readStringUntil(' ').toInt();
 
         // Serial.read(); //next character is space, so skip it using this
         String new_direction = Serial.readStringUntil('\n');
-        setupMotor(input_targetSpeed, new_direction);
+        Serial.printf("Setting: %.2f ", inputPercent);
+        Serial.println(new_direction);
+        setupMotor(inputPercent, new_direction);
     }
 
     if (running)
@@ -155,17 +162,26 @@ void loop()
 
         delayMicroseconds(100);
 
-        if (holdTime > targetSpeed)
+        if (holdTime > targetHoldTime)
         {
-            holdTime -= 0.5;
+            holdTime -= 0.025 * holdTime; // (=0.5)
         }
-        else if (holdTime < targetSpeed)
+        else if (holdTime < targetHoldTime)
         {
-            holdTime += 0.25;
+            holdTime += 0.025; // (=0.25)
         }
 
         // Monitors the current speed
-        status = -(holdTime - max) / ((max - min) * (0.01));
+        status = -(holdTime - maxPulse) / ((maxPulse - minPulse) * (0.01));
+        if (millis() % 1000 == 0)
+        {
+            /*
+                  Serial.printf("status: %.3f\n", status);
+                  Serial.printf("  holdTime: %.3f\n", holdTime);
+                  Serial.printf("  targetHoldTime: %.3f\n", targetHoldTime);
+                  Serial.printf("  td: %d\n", td);
+            */
+        }
 
         if (status == 100)
         {
