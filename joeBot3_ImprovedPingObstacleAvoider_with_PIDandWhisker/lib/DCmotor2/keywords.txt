@@ -1,0 +1,5 @@
+DCmotor2	KEYWORD1
+halt	KEYWORD2
+forward	KEYWORD2
+backward	KEYWORD2
+go	KEYWORD2
