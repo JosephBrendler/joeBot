@@ -3,6 +3,7 @@
     As chosen by switch S2, either fades the colors on an LED strip, repeatedly, or sets color as chosen by trim-pots
     (See Schematic: Luminance_LED_Driver_Congroller_v2.sch)
  */
+#include <Arduino.h>
 
 // initialize led pins
 //int red_led = 10;      //pwm pin D10; ATMEGA328P pin 16
@@ -34,6 +35,11 @@ int brightness = 0;
 
 const int ON = 255;     
 const int OFF = 0;  
+
+// ----------- function declarations ----------------
+void LED_write(int pin, int LED_brightness);
+void fade_sequence();
+void analog_setting();
 
 // the setup routine runs once when you press reset:
 void setup() {
