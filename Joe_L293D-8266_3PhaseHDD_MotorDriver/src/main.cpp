@@ -20,9 +20,13 @@
    */
 #include <Arduino.h>
 
-#define phase1 D5    // gpio 14; pin 4
-#define phase2 D6    // gpio 12; pin 5
-#define phase3 D7    // gpio 13; pin 6
+#define phase1A D5
+#define phase2A D6
+#define phase3A D7
+#define phase1B 0  // just physically tie these low for now
+#define phase2B 0
+#define phase3B 0
+
 #define gearLED_0 D1 // gpio 5; pin 14
 #define gearLED_1 D8 // gpio 0; pin 7
 #define gearLED_2 D4 // gpio 2; pin 11
@@ -60,43 +64,13 @@ bool thirdgear = false;
 bool fourthgear = false;
 bool fifthgear = false;
 bool sixthgear = false;
-bool calibrated = false;
-
-int calibrationCount = 0;
 
 uint64_t periodMicros = 21500; // HDD empirically measured
-uint64_t lastTrigger = 0;
-uint64_t thisTrigger = 0;
-uint64_t delta = 0;
-
-uint64_t periodSum = 0;
-uint64_t periodAvg = 0;
-
-// -------- define and initialize interrupt line structs -----------
-struct photoInterruptLine
-{
-  const uint8_t PIN;         // gpio pin number
-  volatile uint32_t numHits; // number of times fired
-  volatile bool TRIGGERED;   // boolean logical; is triggered now
-};
-photoInterruptLine photoTrigger = {photoInterruptPin, 0, false};
 
 //--------- function declarations ------------
 void myDelay(unsigned long stepMicroseconds);
 void switchStep(int stage);
 void adjustStepLength();
-void updateTiming();
-void controlStepLength();
-void calibrate();
-
-// --------------- interrupt function declarations ---------------
-/*------------------------------------------------------------------------------
-   trigger() -- photo-trigger interrupt
-  ------------------------------------------------------------------------------*/
-void IRAM_ATTR trigger()
-{
-  photoTrigger.TRIGGERED = true;
-}
 
 //---------- setup() -------------------------
 void setup()
@@ -108,54 +82,37 @@ void setup()
   // - easier with pinMode() and digitalWrite()
   //   because we only write one phase at a time in switchStep()
   Serial.print("Configure 3 x phase driver outputs... ");
-  pinMode(phase1, OUTPUT);
-  pinMode(phase2, OUTPUT);
-  pinMode(phase3, OUTPUT);
+  pinMode(phase1A, OUTPUT);
+  pinMode(phase2A, OUTPUT);
+  pinMode(phase3A, OUTPUT);
   Serial.print("==> Done\nSetting all phase drivers HIGH... ");
+  // *** Caution: never write a phase A and B HIGH at the same time
+  // (For now, always write something low then maybe the other its complement)
+  digitalWrite(phase1A, LOW);
+  digitalWrite(phase2A, LOW);
+  digitalWrite(phase3A, LOW);  // B side of each phase is tied low for now
   // this should push the rotor to an equilibrium position between stator windings
-  // (i.e. a known starting position)
-  digitalWrite(phase1, HIGH);
-  digitalWrite(phase2, HIGH);
-  digitalWrite(phase3, HIGH);
+  // (i.e. a known starting position)  digitalWrite(phase1A, HIGH);
+  digitalWrite(phase1A, HIGH);
+  digitalWrite(phase2A, HIGH);
+  digitalWrite(phase3A, HIGH);
   Serial.println("==> Done");
-
-  // Configure photo trigger interrupt pin
-  Serial.print("Configure photo trigger interrupt pin... ");
-  pinMode(photoTrigger.PIN, INPUT_PULLUP);
-  Serial.println("==> Done");
-  Serial.print("Attach photo trigger interrupt... ");
-  attachInterrupt(photoTrigger.PIN, trigger, FALLING);
-  Serial.println("==> Done");
-
-  // start timing
-  updateTiming();
 
   // Configure 3 x gearLED pins -
   Serial.print("Configure 3 x gearLED outputs... ");
   pinMode(gearLED_0, OUTPUT);
   pinMode(gearLED_1, OUTPUT);
   pinMode(gearLED_2, OUTPUT);
-  // ToDo - convert to gpio.config() and write all 3 at once?
-  /*    gpio.config
-          io_conf.intr_type = (gpio_int_type_t)GPIO_PIN_INTR_DISABLE;
-  io_conf.mode = GPIO_MODE_OUTPUT;
-  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-  io_conf.pin_bit_mask = (1 << gearLED_0) | (1 << gearLED_1) | (1 << gearLED_2);
-  gpio_config(&io_conf);
-  // set all phases HIGH (set output pins)
-  Serial.print("==> Done\nSetting all phase drivers HIGH... ");
-  GPIO.out_w1ts = (1 << gearLED_0) | (1 << gearLED_1) | (1 << gearLED_2);
-  Serial.println("==> Done");
-  */
+  // ToDo - convert to gpio.config() and write all 3 at once? /// 8266 doesn't support this
+
   digitalWrite(gearLED_0, HIGH);
   digitalWrite(gearLED_1, LOW);
   digitalWrite(gearLED_2, LOW);
   Serial.println("Done setup");
   Serial.println("Starting in first gear, stage 0");
-  // GPIO.out_w1tc = (1 << phase1) | (1 << phase2); // LLH
-  digitalWrite(phase1, LOW);
-  digitalWrite(phase2, LOW);
+  // GPIO.out_w1tc = (1 << phase1A) | (1 << phase2A); // LLH   /// 8266 doesn't support this
+  digitalWrite(phase1A, LOW);
+  digitalWrite(phase2A, LOW);
 }
 
 //--------------- loop() --------------------------
@@ -167,88 +124,43 @@ void loop()
   {
     switchStep(i);
   }
-  if (sixthgear)
-  {
-    // if (calibrated)
-    if (false)
-    {
-      controlStepLength();
-    }
-    else
-    {
-      adjustStepLength();
-    }
-  }
-  else
-  {
-    adjustStepLength();
-  }
+
+  adjustStepLength();
 }
 
-void updateTiming()
-{
-  thisTrigger = micros();
-  delta = thisTrigger - lastTrigger;
-  lastTrigger = thisTrigger;
-  if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-      ((periodMicros < delta) && (delta - periodMicros) < 1000))
-  {
-    periodMicros = delta;
-  }
-  // calibrate to the average period in sixth gear, then control to that
-  if (sixthgear && !calibrated)
-  {
-    if (calibrationCount++ < 1000)
-    {
-      periodSum += periodMicros;
-    }
-    else
-    {
-      periodSum += periodMicros;
-      periodAvg = (uint64_t)(periodSum / 1000.0);
-      calibrated = true;
-    }
-  }
-}
 //--------------- switchStep() --------------------------
 void switchStep(int stage)
 {
-  // put interrupt flag handler here, note each case: below has a delay of about 1/8 of the period
-  if (photoTrigger.TRIGGERED)
-  {
-    updateTiming();
-    photoTrigger.TRIGGERED = false;
-  }
   switch (stage)
   {
   case 0:
     // LLH
-    digitalWrite(phase2, LOW);
+    digitalWrite(phase2A, LOW);
     myDelay(stepLength);
     break;
   case 1:
     // HLH
-    digitalWrite(phase1, HIGH);
+    digitalWrite(phase1A, HIGH);
     myDelay(stepLength);
     break;
   case 2:
     // HLL
-    digitalWrite(phase3, LOW);
+    digitalWrite(phase3A, LOW);
     myDelay(stepLength);
     break;
   case 3:
     // HHL
-    digitalWrite(phase2, HIGH);
+    digitalWrite(phase2A, HIGH);
     myDelay(stepLength);
     break;
   case 4:
     // LHL
-    digitalWrite(phase1, LOW);
+    digitalWrite(phase1A, LOW);
     myDelay(stepLength);
     break;
   default:
     // LHH
-    digitalWrite(phase3, HIGH);
+    digitalWrite(phase3A, HIGH);
     myDelay(stepLength);
     break;
   }
@@ -270,13 +182,6 @@ void myDelay(unsigned long stepMicroseconds)
 //--------------- adjustStepLength() --------------------------
 void adjustStepLength()
 {
-  // put interrupt flag handler here
-  // the rammp-up controller code below is fast but executed once every loop until at stable controlled speed
-  if (photoTrigger.TRIGGERED)
-  {
-    updateTiming();
-    photoTrigger.TRIGGERED = false;
-  }
   // adjust stepLength by stepSize
   if (stepLength > minStepLength)
   {
@@ -344,23 +249,5 @@ void adjustStepLength()
       digitalWrite(gearLED_2, HIGH);
       steps = fifthGearSteps;
     }
-  }
-}
-
-void controlStepLength()
-{
-  if (photoTrigger.TRIGGERED)
-  {
-    updateTiming();
-    photoTrigger.TRIGGERED = false;
-  }
-
-  if (periodMicros > periodAvg)
-  {
-    stepLength = (uint32_t)(periodMicros / float(24.05));
-  }
-  else
-  {
-    stepLength = (uint32_t)(periodAvg / float(24));
   }
 }
