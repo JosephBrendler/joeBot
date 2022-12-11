@@ -1,5 +1,7 @@
+#include <Arduino.h>
 #include <heltec.h>
 #include "images.h"
+
 void setup()
 {
     Serial.begin(115200);
