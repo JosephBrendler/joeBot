@@ -235,7 +235,7 @@ void Stepper::step(int steps_to_move)
   }
 
   // decrement the number of steps, moving one step each time:
-  while (steps_left > 0)
+  while (steps_left > 0 && !INTERRUPTED)
   {
     yield();
     unsigned long now = micros();
@@ -454,9 +454,24 @@ void Stepper::stepMotor(int thisStep)
 }
 
 /*
+  set interrupt flag for otherwise blocking code
+*/
+void Stepper::interrupt(void)
+{
+  this->INTERRUPTED = true;
+}
+/*
+  clear interrupt flag for otherwise blocking code
+*/
+void Stepper::clear_interrupt(void)
+{
+  this->INTERRUPTED = false;
+}
+
+/*
   version() returns the version of the library:
 */
 int Stepper::version(void)
 {
-  return 6;
+  return 7;
 }
