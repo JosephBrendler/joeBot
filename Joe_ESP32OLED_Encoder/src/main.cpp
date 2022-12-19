@@ -1,25 +1,8 @@
-/* 3-phase motor driver
-   Joe Brendler 20 Nov 2022
-   Initially based on tuturial by Bart Venneker youtube.com/watch?v=CMz2DYpos8w
-   and OLED code from Heltec - https://github.com/HelTecAutomation/Heltec_ESP32
-   Modifications -
-   - moved steplength adjustment to function (simplifing loop)
-   - started slower, lengthened transitions from gear 1-2 and 3-4, added gears 5, 6
-   - switched from 8266 to ESP32, to enable parallel-bit-writing
-
-   Basic idea - start with long 3-phase pulse signal, and gradually accelerate by reducing the pulse-lenth (stepLength)
-   ToDo -
-     + drop gear_LEDs in favor of OLED feedback
-     + shift to direct register manipulation of consecutive gpios
-     + shift to hardware timer interrupts instead of delays in loop function
-       -- timer0 = stage duration (stepLentgh)
-       -- isr() = stage++; STEP=true; (flag to switchstep(stage) and set STEP=false)
-     + shift to
-     add PID control??
-
-
-    Note - currently 8266 only, using gpio.config() rather than esp32's gpio_config_t
-   */
+/*----------------------
+ Encoder example w OLED
+   Joe Brendler 19 Dec 2022
+   OLED code from Heltec - https://github.com/HelTecAutomation/Heltec_ESP32
+-----------------------*/
 #include <Arduino.h>
 #include <heltec.h>
 #include "images.h"
@@ -27,9 +10,6 @@
 #define phase1A 17 // consecutive bits can be written easily with three bits shifted to the LSB position (0b111<<phase1A)
 #define phase2A 18
 #define phase3A 19
-#define phase1B 0 // just physically invert the A phases of these low for now
-#define phase2B 0
-#define phase3B 0
 
 // config gpios
 gpio_config_t io_conf;
@@ -45,15 +25,15 @@ const int firstGearSteps = 50;   // us (Bart: 5)
 const int secondGearSteps = 300; // us (Bart: 300)
 const int thirdGearSteps = 50;   // us (Bart: 50)
 const int fourthGearSteps = 2;   // us (Bart: 2)
-const int fifthGearSteps = 2;     // us (Bart: n/a)
-const int sixthGearSteps = 2;     // us (Bart: n/a)
+const int fifthGearSteps = 2;    // us (Bart: n/a)
+const int sixthGearSteps = 2;    // us (Bart: n/a)
 
 // define the threshold for when to shift gears (to steps above)
-const int gear_12_threshold = 39950; // us (old: 39950)
-const int gear_23_threshold = 18000; // us (20000)
-const int gear_34_threshold = 3000;  // us (3000)
-const int gear_45_threshold = 1100;  // us (1100)
-const int gear_56_threshold = minStepLength;  // us (n/a)
+const int gear_12_threshold = 39950;         // us (old: 39950)
+const int gear_23_threshold = 18000;         // us (20000)
+const int gear_34_threshold = 3000;          // us (3000)
+const int gear_45_threshold = 1100;          // us (1100)
+const int gear_56_threshold = minStepLength; // us (n/a)
 
 const int delay_threshold = 16380; // us (above this use delay(ms), below use delayMicroseconds(us))
 
@@ -73,7 +53,7 @@ const int line_0 = 0, line_1 = 10, line_2 = 20, line_3 = 30, line_4 = 40;
 String msg = "", gear_str = "", stepLength_str = "";
 String old_gear_str = "", old_stepLength_str = "";
 
-unsigned long now = 0, old_millis = 0;   // loop timing
+unsigned long now = 0, old_millis = 0; // loop timing
 
 //--------- function declarations ------------
 void myDelay(unsigned long stepMicroseconds);
