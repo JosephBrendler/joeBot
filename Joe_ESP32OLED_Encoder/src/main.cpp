@@ -6,23 +6,23 @@
 #include <Arduino.h>
 #include <heltec.h>
 #include "images.h"
-#include <Encoder.h>
 
-#define phase1A 17 // consecutive bits can be written easily with three bits shifted to the LSB position (0b111<<phase1A)
-#define phase2A 18
-#define phase3A 19
+#include <ESP32Encoder.h>
 
-Encoder myEncoder(37, 38); // inputs GPIO 37, 38 for encoder interrupts
+ESP32Encoder encoder;
+
 long oldPosition = -999, newPosition = 0;
-long newSpeed = 0, oldSpeed = 0;
-unsigned long delta_t = 0; // in usec
+double newSpeed = 0, oldSpeed = 0;
+String newDirection = "ccw", oldDirection = newDirection;
+unsigned long newMicros = 0, oldMicros = 0; // loop timing
+unsigned long delta_t = 0;                  // in usec
 
 // config gpios
 gpio_config_t io_conf;
 
 uint64_t periodMicros = 21500; // HDD empirically measured
 
-const int col_space = 30;
+const int col_space = 25;
 const int col0_x = 0,
           col1_x = col0_x + col_space,
           col2_x = col1_x + col_space,
@@ -31,8 +31,6 @@ const int col0_x = 0,
 const int line_0 = 0, line_1 = 10, line_2 = 20, line_3 = 30, line_4 = 40;
 
 String msg = "", old_msg = "";
-
-unsigned long now = 0, old_millis = 0; // loop timing
 
 //--------- function declarations ------------
 void update_display(String old_var1, String old_var2, String old_var3, String new_var1, String new_var2, String new_var3);
@@ -54,7 +52,14 @@ void setup()
   Heltec.display->drawString(col0_x, line_2, msg);
   Heltec.display->display();
   // Initialize encoder
-  myEncoder.write(0);
+  // use pin ___, ___ for the encoder
+  // encoder.attachHalfQuad(32, 33);
+  encoder.attachFullQuad(18, 19);
+  // set starting count value after attaching
+  // encoder.setCount(37);
+  // clear the encoder's raw count and set the tracked count to zero
+  encoder.clearCount();
+  Serial.println("Encoder Start = " + String((int32_t)encoder.getCount()));
   msg = "Initializing Encoder: Done";
   Heltec.display->drawString(col0_x, line_2, msg);
   Heltec.display->display();
@@ -75,7 +80,8 @@ void setup()
   Heltec.display->drawString(col0_x, line_2, msg);
   msg = "Speed: ";
   Heltec.display->drawString(col0_x, line_3, msg);
-  update_display("0", "0", "0", "0", "0", "0"); // initial placeholder data
+  // display initial placeholder data
+  update_display(oldDirection, String(oldPosition), String(oldSpeed), newDirection, String(newPosition), String(newSpeed));
   Heltec.display->display();
 
   Serial.println("setup() done");
@@ -84,28 +90,33 @@ void setup()
 //--------------- loop() --------------------------
 void loop()
 {
-  // every half-second, update display with encoder data
-  now = millis();
-  delta_t = now - old_millis;
-  if (delta_t > 500) // update display periodically
+  // periodically update display with encoder data
+  newMicros = micros();
+  delta_t = newMicros - oldMicros;
+  if (delta_t > 100) // update display periodically
   {
-    String newDir = "ccw (temp)", oldDir = newDir;
-    old_millis = now;
-    newPosition = myEncoder.read();
-    if (newPosition != oldPosition)
+    // update position
+    newPosition = encoder.getCount();
+    delay(1000);
+    if (newPosition != oldPosition) // update direction
     {
-      newSpeed = (long)((newPosition - oldPosition) / (float)delta_t);
+      if (newPosition > oldPosition)
+        newDirection = "cw";
+      else
+        newDirection = "ccw";
+      // update speed = ticks per second
+      newSpeed = (double)((newPosition - oldPosition) * 1000000 / (double)delta_t);
 
-      Serial.printf("newDir: %s\n", newDir);
+      Serial.printf("newDirection: %s\n", newDirection);
       Serial.printf("newPosition: %d\n", newPosition);
-      Serial.printf("newSpeed: %d\n", newSpeed);
-      update_display(oldDir, String(oldPosition), String(oldSpeed), newDir, String(newPosition), String(newSpeed));
+      Serial.printf("newSpeed: %.15f\n", newSpeed);
+      update_display(oldDirection, String(oldPosition), String(oldSpeed), newDirection, String(newPosition), String(newSpeed));
 
+      oldMicros = newMicros;
       oldPosition = newPosition;
       oldSpeed = newSpeed;
-      oldDir = newDir;
+      oldDirection = newDirection;
     }
-
   }
 }
 
