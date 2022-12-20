@@ -7,6 +7,8 @@
 
 #include <Encoder.h>
 
+// This encoder is a no-go for HELTEC WiFi Kit OLED ESP32
+
 // Change these two numbers to the pins connected to your encoder.
 //   Best Performance: both pins have interrupt capability
 //   Good Performance: only the first pin has interrupt capability
@@ -21,8 +23,6 @@ void setup()
 }
 
 long oldPosition = -999;
-
-
 
 void loop()
 {
