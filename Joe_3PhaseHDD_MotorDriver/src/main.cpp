@@ -66,7 +66,7 @@ double period = 0.0, oldPeriod = period;
 // then I got as fast as 900 somewhat stable in "5th gear" , but (POV patterns are "wobbly" -- switching back to 1400)
 
 // define how much each cycle will reduce the driver signal pulse duration
-const int accelerationFactor = 500; // us (faster than current period)(700 w 5v)
+const int accelerationFactor = 300; // us (faster than current period)(700 w 5v)
 const int firstGearSteps = 50;    // us (Bart: 5)
 const int secondGearSteps = 300;  // us (Bart: 300)
 const int thirdGearSteps = 50;    // us (Bart: 50)
@@ -343,15 +343,15 @@ void adjustStepLength()
   // adjust stepLength by stepSize
   if (stepLength > minStepLength)
   {
-    if (gear < 4)
+    if (gear < 5)
     {
       stepLength = stepLength - steps;
     }
     else
     {
       // estimate necessary steplength (usec)
-      // 20 steps of 4 pulses; convert to us; adjust to accelerate
-      stepLength = (uint64_t)((period * 1000000.0) / (20.0 * 4.0)) - accelerationFactor;
+      // 20 cycles of 6 steps per revolution; convert to us; adjust to accelerate
+      stepLength = (uint64_t)((period * 1000000.0) / (20.0 * 6.0)) - accelerationFactor;
     }
   }
   else
