@@ -17,7 +17,8 @@ Stepper myStepper(stepsPerCycle, phase1, phase2, phase3);
 
 long loopcount = 0;
 int newSpeed = 100, oldSpeed = newSpeed; // initial value
-int speedIncrement = 1;
+int speedIncrement = 1;                  // us
+int speedLimit = 7200;                   // rpm
 
 // initialize OLED display geometry
 const int col_space = 40;
@@ -30,6 +31,25 @@ const int line_0 = 0, line_1 = 10, line_2 = 20, line_3 = 30, line_4 = 40, line_5
 
 // initialize display text variables
 String msg = "", old_msg = "";
+
+// initialize timing variables
+uint64_t newMicros = 0, oldMicros = 0;
+
+// initialize interrupt and associated isr
+struct InterruptLine
+{
+  const uint8_t PIN;
+  uint32_t numHits;
+  bool TRIGGERED;
+};
+
+InterruptLine photoTrigger = {encoder_a, 0, false};
+
+void IRAM_ATTR trigger_isr()
+{
+  photoTrigger.numHits++;
+  photoTrigger.TRIGGERED = true;
+}
 
 //--------- OLED display function declarations ------------
 void update_display(String old_var1, String old_var2, String old_var3,
@@ -52,11 +72,12 @@ void setup()
   Heltec.display->drawString(col0_x, line_1, msg);
   Heltec.display->display();
 
-  msg = "Init Interrupt...";
+  msg = "Config Interrupt...";
   Heltec.display->drawString(col0_x, line_2, msg);
   Heltec.display->display();
-
-  msg = "Init Interrupt: Done";
+  pinMode(photoTrigger.PIN, INPUT_PULLUP);
+  attachInterrupt(photoTrigger.PIN, trigger_isr, FALLING);
+  msg = "Config Interrupt: Done";
   Heltec.display->drawString(col0_x, line_2, msg);
   Heltec.display->display();
   Serial.println("Interrupt Initialized");
@@ -87,34 +108,50 @@ void setup()
                  "", "", String(newSpeed),
                  "", "", "");
   Heltec.display->display();
+
+  // move to a known start point
+  digitalWrite(phase1, HIGH);
+  digitalWrite(phase2, HIGH);
 }
 
 void loop()
 {
-  myStepper.step(stepsPerCycle);
-
-  if (++loopcount % 3 == 0)
+  newMicros = micros();
+  loopcount++;
+  if (photoTrigger.TRIGGERED)
   {
-    // including the following encoder-measurement-code slows the loop enough to affect performance
-    // this runs ok w/o it...
-    //
+    photoTrigger.TRIGGERED = false;
+    if (photoTrigger.numHits % 4 == 0)
+    {
+      Serial.printf("Interrupt has fired %u times\n", photoTrigger.numHits);
+      photoTrigger.numHits = 0;
+      myStepper.step(stepsPerCycle);
+    }
+  }
+  if (newMicros - oldMicros > 1000000) // 1 sec, 1000 ms
+  {
     //  newPosition = encoder.getCount();
     //  newMicros = micros();
     //  delta_t = newMicros - oldMicros;
     //  oldMicros = newMicros;
     //  newMeasuredSpeed = (double)((newPosition - oldPosition) * 1000000 / (double)delta_t);
-    speedIncrement = map(newSpeed, 0, 3000, 20, 1);
-    newSpeed += speedIncrement;
-    myStepper.setSpeed(newSpeed);
-  }
-  if (loopcount % 10)
-  {
-
+    speedIncrement = map(newSpeed, 0, speedLimit, 25, 1);
+    if (newSpeed < speedLimit)
+    {
+      oldSpeed = newSpeed;
+      newSpeed += speedIncrement;
+      myStepper.setSpeed(newSpeed);
+    }
+    else
+    {
+      oldSpeed = newSpeed;
+      newSpeed = speedLimit;
+    }
     update_display("", "", String(oldSpeed),
-                   "", "", String(loopcount - 1),
+                   "", "", "",
                    "", "", String(newSpeed),
-                   "", "", String(loopcount));
-    oldSpeed = newSpeed;
+                   "", "", "");
+    oldMicros = newMicros;
   }
 }
 
@@ -160,7 +197,6 @@ void update_display(String old_var1, String old_var2, String old_var3,
   Heltec.display->drawString(col2_x, line_3, old_var4);
   Heltec.display->drawString(col2_x, line_4, old_var5);
   Heltec.display->drawString(col2_x, line_5, old_var6);
-
   Heltec.display->display();
 
   // write the new data
