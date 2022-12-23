@@ -129,7 +129,7 @@ void loop()
   }
   // step one revolution in one direction:
   myStepper.step(stepsPerRevolution);
-  delay(500);
+  //delay(500);
 
   // read speed from 12-bit ADC input (map 1-1000; stepper doesn't like speed=0)
   speed = (long)(map(analogRead(pot), 0, 4095, 1, 100));
@@ -154,7 +154,7 @@ void loop()
   // step one revolution in the other direction:
   myStepper.step(-stepsPerRevolution);
 
-  delay(500);
+  //delay(500);
 }
 
 //---------------------[ functions ]------------------------------------------------------------
