@@ -71,11 +71,22 @@ bool DONE_RADAR = false;  // done displaying radar scan?
 const int offset = 5; // (14) number of "seconds" slots to rotate display (ccw) for orientation
 //-----------------------------------------------------------------------------------
 
-// ToDO - calibration (for now 21.6ms period = 60 x 360us slots)
-const unsigned int slotWidth = 360;
+//------[ period timing ]------------------------------------------------------------
 
-const unsigned int intervalOn = (unsigned int)(slotWidth / 3);           // draw skinnier lines
-const unsigned int intervalOff = (unsigned int)(slotWidth - intervalOn); // draw skinnier lines
+uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
+uint64_t radarSlot = 0;        // also in ticks (used in radar function)
+
+uint64_t lastTrigger = 0;
+uint64_t thisTrigger = 0;
+uint64_t delta = 0;
+//-----------------------------------------------------------------------------------
+
+// ToDO - calibration (for now 21.6ms period = 60 x 360us slots)
+// const unsigned int slotWidth = 360;
+uint64_t slotWidth = periodMicros / 60;
+
+uint64_t intervalOn = (unsigned int)(slotWidth / 3);                     // draw skinnier lines
+uint64_t intervalOff = (unsigned int)(slotWidth - intervalOn);           // draw skinnier lines
 
 int function = 0; // function read from 4 bits, selected by pushbutton
 
@@ -122,6 +133,7 @@ void loop_fn_checker_colors();
 void loop_fn_fan();
 void loop_fn_altClock();
 void loop_fn_multicolor_fan();
+void recalibrate();
 void dumpClockFace(); // for debugging
 
 // --------------- interrupt function declarations ---------------
@@ -259,6 +271,16 @@ void setup()
     Serial.println("==> Done");
     digitalWrite(LED2, LED_ON); // demonstrate setup (blink uses delay, so it needs interrupts turned on
     blink();
+
+    // waid for disc to spin up
+    delta = 50000;
+    while (delta > 40000){
+        if ( photoTrigger.TRIGGERED ) {
+            recalibrate();
+            Serial.printf("triggered, delta: %d\n", delta);
+            photoTrigger.TRIGGERED = false;
+        }
+    }
 
     Serial.println("==> Setup complete");
     Serial.println("---------------[ Runtime Output Follows ]-------------------");
@@ -601,16 +623,8 @@ void loop_fn_radar()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
@@ -622,14 +636,8 @@ void loop_fn_radar()
             delayMicroseconds(intervalOn);
             GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
+
             milliseconds = millis();
             radarSlot = (uint64_t)(periodMicros * (milliseconds % 5000) / 5000.0);
             // Serial.printf("radarSlot: %d\n", radarSlot);
@@ -661,30 +669,15 @@ void loop_fn_RedBlack()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
         if (photoTrigger.TRIGGERED) // start pattern
         {
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
 
             // draw 8 bands alternating red/black
             for (i = 0; i <= 3; i++)
@@ -716,30 +709,15 @@ void loop_fn_colors()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
         if (photoTrigger.TRIGGERED) // start pattern
         {
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
 
             // draw 8 bands of 3-bit RGB color
             for (i = 0; i <= 7; i++)
@@ -770,16 +748,8 @@ void loop_fn_checkers()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
@@ -788,14 +758,7 @@ void loop_fn_checkers()
         if (photoTrigger.TRIGGERED) // start pattern
         {
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
 
             // draw 8 bands alternating red/black
             for (i = 0; i <= checkerNumber; i++)
@@ -827,16 +790,8 @@ void loop_fn_checker_colors()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
@@ -845,14 +800,7 @@ void loop_fn_checker_colors()
         if (photoTrigger.TRIGGERED) // start pattern
         {
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
 
             // draw 8 bands alternating red/black
             for (i = 0; i <= checkerNumber; i++)
@@ -883,16 +831,8 @@ void loop_fn_fan()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
@@ -904,14 +844,8 @@ void loop_fn_fan()
             delayMicroseconds(intervalOn);
             GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
             // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+            recalibrate();
+
             milliseconds = millis();
             radarSlot = (uint64_t)(periodMicros * (milliseconds % 5000) / 5000.0);
             // Serial.printf("radarSlot: %d\n", radarSlot);
@@ -955,6 +889,7 @@ void loop_fn_altClock()
             // ToDo -- use relative number to "align the clock face"
             // display the 0-marker; provides offset and reverses b/c disk rotates ccw
             // (then write 3-bit RGB to the consecutive LED register bits)
+            recalibrate();
             for (i = 0; i <= 59; i++)
             {
                 GPIO.out_w1ts = ((ClockFace[59 - ((offset + i) % 60)]) << RED_LED);
@@ -994,17 +929,8 @@ void loop_fn_multicolor_fan()
     portENTER_CRITICAL(&secondTimerMux);
     timerAlarmDisable(secondTimer);
     portEXIT_CRITICAL(&secondTimerMux);
-    uint64_t periodMicros = 21500; // (21995) empirically determined (for prescaler 80)
-    uint64_t radarSlot = 0;        // also in ticks
-
-    uint64_t lastTrigger = 0;
-    uint64_t thisTrigger = 0;
-    uint64_t delta = 0;
-
-
     Serial.println("- configured");
 
-    lastTrigger = micros();
     // perform this function until reset
     while (!buttonPress.PRESSED)
     {
@@ -1012,24 +938,18 @@ void loop_fn_multicolor_fan()
         {
             // get a number between 0 and 7, for RGB value of fan pattern
             checkerNumber = map(analogRead(checkerNumber_pin), 0, 1023, 0, 7);
-            // mark sync spot
+            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
+            recalibrate();
+             // mark sync spot
             GPIO.out_w1ts = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
             delayMicroseconds(intervalOn);
             GPIO.out_w1tc = (1 << RED_LED) | (1 << GREEN_LED) | (1 << BLUE_LED);
-            // calculate how long to wait to display radar beacon - 5 sec to come 360 deg
-            thisTrigger = micros();
-            delta = thisTrigger - lastTrigger;
-            lastTrigger = thisTrigger;
-            if (((periodMicros > delta) && (periodMicros - delta) < 1000) ||
-                ((periodMicros < delta) && (delta - periodMicros) < 1000))
-            {
-                periodMicros = delta;
-            }
+
             milliseconds = millis();
             radarSlot = (uint64_t)(periodMicros * (milliseconds % 5000) / 5000.0);
             // Serial.printf("radarSlot: %d\n", radarSlot);
 
-            GPIO.out_w1ts = (checkerNumber << RED_LED);
+            GPIO.out_w1ts = (checkerNumber << RED_LED);  // display selected color
             delayMicroseconds(radarSlot);
             GPIO.out_w1ts = (WHITE << RED_LED);
             delayMicroseconds(intervalOn);
@@ -1040,4 +960,18 @@ void loop_fn_multicolor_fan()
             photoTrigger.TRIGGERED = false;
         }
     }
+}
+
+void recalibrate() {
+    thisTrigger = micros();
+    delta = thisTrigger - lastTrigger;
+    lastTrigger = thisTrigger;
+    if (((periodMicros > delta) && (periodMicros - delta) < 40000) ||
+        ((periodMicros < delta) && (delta - periodMicros) < 40000))
+    {
+        periodMicros = delta;
+    }
+    slotWidth = periodMicros / 60;
+    intervalOn = (unsigned int)(slotWidth / 3);           // draw skinnier lines
+    intervalOff = (unsigned int)(slotWidth - intervalOn); // draw skinnier lines
 }

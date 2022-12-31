@@ -14,7 +14,7 @@ Stepper myStepper(stepsPerCycle, phase1, phase2, phase3);
 
 int speed = 100; // initial value
 int speedIncrement = 1;
-int speedLimit = 5000;
+int speedLimit = 7000;
 String msg = "";
 
 uint64_t now = 0, before = 0;
